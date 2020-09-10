@@ -18,53 +18,49 @@ import torch.optim as optim
 import torch.utils.data as data
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-import models.cifar as models
+# import models.cifar as models
+from models import RensnetAndSTGCNDistill
 import numpy as np
-from utils import Bar, Logger, AverageMeter, accuracy, mkdir_p, savefig, pickle_2_img_single
+from utils import Bar, Logger, AverageMeter, accuracy, mkdir_p, savefig, pickle_2_img_single, pickle_2_img_and_landmark
+import logging
+import matplotlib.pyplot as plt 
 
-
-model_names = sorted(name for name in models.__dict__
-    if name.islower() and not name.startswith("__")
-    and callable(models.__dict__[name]))
 
 parser = argparse.ArgumentParser(description='PyTorch ckp Training')
 # Datasets
 parser.add_argument('-d', '--dataset', default='ckp', type=str)
-parser.add_argument('--dataset-path', default='data\ckp_with_img_geometry_106.pkl')  # windows style
+parser.add_argument('--dataset-path', default='data\ck+_6_classes_img_and_55_landmark.pickle')  # windows style
 # parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
 #                     help='number of data loading workers (default: 4)')
 parser.add_argument('-f', '--folds', default=10, type=int, help='k-folds cross validation.')
 # Optimization options
-parser.add_argument('--epochs', default=100, type=int, metavar='N',
+parser.add_argument('--epochs', default=50, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('--train-batch', default=32, type=int, metavar='N',
+parser.add_argument('--train-batch', default=16, type=int, metavar='N',
                     help='train batchsize')
-parser.add_argument('--test-batch', default=100, type=int, metavar='N',
+parser.add_argument('--test-batch', default=16, type=int, metavar='N',
                     help='test batchsize')
-parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
+parser.add_argument('--lr', '--learning-rate', default=0.005, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--drop', '--dropout', default=0, type=float,
                     metavar='Dropout', help='Dropout ratio')
-parser.add_argument('--schedule', type=int, nargs='+', default=[150, 225],
+parser.add_argument('--schedule', type=int, nargs='+', default=[50, 75],
                         help='Decrease learning rate at these epochs.')
-parser.add_argument('--gamma', type=float, default=0.1, help='LR is multiplied by gamma on schedule.')
+parser.add_argument('--gamma', type=float, default=0.8, help='LR is multiplied by gamma on schedule.')
+parser.add_argument('--theta', type=float, default=0.5, help='initial value of coeffient for similar loss function.')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
-parser.add_argument('--weight-decay', '--wd', default=5e-4, type=float,
+parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
 # Checkpoints
-parser.add_argument('-c', '--checkpoint', default='checkpoints/ckp_resnet', type=str, metavar='PATH',
+parser.add_argument('-c', '--checkpoint', default='checkpoints/ckp_resnet_and_stgcn_distill', type=str, metavar='PATH',
                     help='path to save checkpoint (default: checkpoint)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 # Architecture
-parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet',
-                    choices=model_names,
-                    help='model architecture: ' +
-                        ' | '.join(model_names) +
-                        ' (default: resnet18)')
+parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet_and_stgcn_distill')
 parser.add_argument('--depth', type=int, default=20, help='Model depth.')
 parser.add_argument('--cardinality', type=int, default=8, help='Model cardinality (group).')
 parser.add_argument('--widen-factor', type=int, default=4, help='Widen factor. 4 -> 64, 8 -> 128, ...')
@@ -80,6 +76,9 @@ parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
 
 args = parser.parse_args()
 state = {k: v for k, v in args._get_kwargs()}
+
+
+theta_schedule = {'start_epoch': 10, 'end_epoch': 50, 'decay_rate': 1, 'initial_theta': args.theta}
 
 # Validate dataset
 assert args.dataset == 'ckp', 'Dataset can only be ckp.'
@@ -110,62 +109,19 @@ def main():
 
     # load data
     print('==> Preparing dataset %s' % args.dataset)
-    features, labels = pickle_2_img_single(args.dataset_path)
+    features, landmarks, labels = pickle_2_img_and_landmark(args.dataset_path)
     num_classes = 6
-
-
-    # if args.dataset == 'cifar10':
-    #     dataloader = datasets.CIFAR10
-    #     num_classes = 10
-    # else:
-    #     dataloader = datasets.CIFAR100
-    #     num_classes = 100
-
-
-    # trainset = dataloader(root='./data', train=True, download=True, transform=transform_train)
-    # trainloader = data.DataLoader(trainset, batch_size=args.train_batch, shuffle=True, num_workers=args.workers)
-
-    # testset = dataloader(root='./data', train=False, download=False, transform=transform_test)
-    # testloader = data.DataLoader(testset, batch_size=args.test_batch, shuffle=False, num_workers=args.workers)
 
     # Model
     print("==> creating model '{}'".format(args.arch))
-    if args.arch.startswith('resnext'):
-        model = models.__dict__[args.arch](
-                    cardinality=args.cardinality,
-                    num_classes=num_classes,
-                    depth=args.depth,
-                    widen_factor=args.widen_factor,
-                    dropRate=args.drop,
-                )
-    elif args.arch.startswith('densenet'):
-        model = models.__dict__[args.arch](
-                    num_classes=num_classes,
-                    depth=args.depth,
-                    growthRate=args.growthRate,
-                    compressionRate=args.compressionRate,
-                    dropRate=args.drop,
-                )
-    elif args.arch.startswith('wrn'):
-        model = models.__dict__[args.arch](
-                    num_classes=num_classes,
-                    depth=args.depth,
-                    widen_factor=args.widen_factor,
-                    dropRate=args.drop,
-                )
-    elif args.arch.endswith('resnet'):
-        model = models.__dict__[args.arch](
-                    num_classes=num_classes,
-                    depth=args.depth,
-                )
-    else:
-        model = models.__dict__[args.arch](num_classes=num_classes)
+    model = RensnetAndSTGCNDistill(num_classes=num_classes)
 
     # model = torch.nn.DataParallel(model).cuda()
     model = model.cuda()
     cudnn.benchmark = True
     print('    Total params: %.2fM' % (sum(p.numel() for p in model.parameters())/1000000.0))
-
+    print('    resnet params: %.2fM' % (sum(p.numel() for p in model.resnet.parameters())/1000000.0))
+    print('    stgcn params: %.2fM' % (sum(p.numel() for p in model.st_gcn.parameters())/1000000.0))
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
@@ -181,44 +137,68 @@ def main():
         start_epoch = checkpoint['epoch']
         model.load_state_dict(checkpoint['state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer'])
-        logger = Logger(os.path.join(args.checkpoint, 'log.txt'), title=title, resume=True)
+        logger = Logger(os.path.join(args.checkpoint, 'log_stat.log'), title=title, resume=True)
     else:
-        logger = Logger(os.path.join(args.checkpoint, 'log.txt'), title=title)
-        logger.set_names(['Learning Rate', 'Train Loss', 'Valid Loss', 'Train Acc.', 'Valid Acc.'])
+        logger = Logger(os.path.join(args.checkpoint, 'log_stat.log'), title=title)
+        logger.set_names(['fold_num', 'Learning Rate', 'Train Loss', 'Valid Loss', 'Train Acc.', 'Valid Acc.'])
+
+    # logging
+    logging.basicConfig(level=logging.DEBUG,
+                        filename=os.path.join(args.checkpoint, 'log_info.log'),
+                        filemode='a+',
+                        format="%(asctime)-15s %(levelname)-8s  %(message)s")
+    # log configuration
+    logging.info('-' * 10 + 'configuration' + '*' * 10)
+    for arg in vars(args):
+        logging.info((arg, str(getattr(args, arg))))
 
     acc_fold = []
     for f_num in range(args.folds):
 
+        model.reset_all_weights()
+        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+
         # save each fold's acc and reset configuration
         average_acc = 0
         best_acc = 0
-        model.reset_all_weights()
+    
 
         # 10-fold cross validation
-        train_x, train_y = [], []
-        test_x, test_y = [], []
+        train_x, train_lm, train_y = [], [], []
+        test_x, test_lm, test_y = [], [], []
         for id_fold in range(args.folds):
             if id_fold == f_num:
                 test_x = features[id_fold]
+                test_lm = landmarks[id_fold]
                 test_y = labels[id_fold]
             else:
                 train_x = train_x + features[id_fold]
+                train_lm = train_lm + landmarks[id_fold]
                 train_y = train_y + labels[id_fold]
         # convert array to tensor
-        train_x = torch.tensor(train_x, dtype=torch.float32) / 255.0  #(b_s, 128, 128)
+        train_x = torch.tensor(train_x, dtype=torch.float) / 255.0  #(b_s, 128, 128)
         train_x = train_x.unsqueeze(1)  #(b_s, 1, 128, 128)
-        test_x = torch.tensor(test_x, dtype=torch.float32) / 255.0
+
+        train_lm = np.stack(train_lm)
+        train_lm = (train_lm - np.mean(train_lm, axis=0)) / np.std(train_lm, axis=0)
+        train_lm = torch.tensor(train_lm, dtype=torch.float)
+        train_lm = train_lm.unsqueeze(2)
+
+        test_x = torch.tensor(test_x, dtype=torch.float) / 255.0
         test_x = test_x.unsqueeze(1)
+        test_lm = (test_lm - np.mean(test_lm, axis=0)) / np.std(test_lm, axis=0)
+        test_lm = torch.tensor(test_lm, dtype=torch.float)
+        test_lm = test_lm.unsqueeze(2)
         train_y, test_y = torch.tensor(train_y), torch.tensor(test_y)
 
-        train_dataset = torch.utils.data.TensorDataset(train_x, train_y)
+        train_dataset = torch.utils.data.TensorDataset(train_x, train_lm, train_y)
         train_iter = torch.utils.data.DataLoader(
             dataset=train_dataset,
             batch_size=args.train_batch,
             shuffle=True
         )
 
-        test_dataset = torch.utils.data.TensorDataset(test_x, test_y)
+        test_dataset = torch.utils.data.TensorDataset(test_x, test_lm, test_y)
         test_iter = torch.utils.data.DataLoader(
             dataset=test_dataset,
             batch_size=args.test_batch,
@@ -230,16 +210,22 @@ def main():
             test_loss, test_acc = test(train_x + test_x, train_y + test_y, model, criterion, start_epoch, use_cuda)
             print(' Test Loss:  %.8f, Test Acc:  %.2f' % (test_loss, test_acc))
             continue
+
+        # show plt
+            plt.show(block=False)
+
         # Train and val
         for epoch in range(start_epoch, args.epochs):
-            adjust_learning_rate(optimizer, epoch)
+            
+            # 在特定的epoch 调整学习率
+            # adjust_learning_rate(optimizer, epoch)
             print('\nEpoch: [%d | %d] LR: %f' % (epoch + 1, args.epochs, state['lr']))
 
             train_loss, train_acc = train(train_iter, model, criterion, optimizer, epoch, use_cuda)
             test_loss, test_acc = test(test_iter, model, criterion, epoch, use_cuda)
 
             # append logger file
-            logger.append([state['lr'], train_loss, test_loss, train_acc, test_acc])
+            logger.append([f_num, state['lr'], train_loss, test_loss, train_acc, test_acc])
 
             # save model
             is_best = test_acc > best_acc
@@ -256,11 +242,12 @@ def main():
         acc_fold.append(best_acc)
         average_acc = sum(acc_fold) / len(acc_fold)
 
-        print('fold: %d, best_acc: %.2f, average_acc: %.2f' % (f_num, best_acc, average_acc))
+        logging.info('fold: %d, best_acc: %.2f, average_acc: %.2f' % (f_num, best_acc, average_acc))
     logger.close()
-    logger.plot()
+    # logger.plot()
     savefig(os.path.join(args.checkpoint, 'log.eps'))
 
+    logging.info('acc_fold' + str(acc_fold))
     print('average acc:')
     print(average_acc)
 
@@ -269,6 +256,7 @@ def train(train_iter, model, criterion, optimizer, epoch, use_cuda):
 
     # set train_loader，batch size 太大跑不动
     # switch to train mode
+    adjust_theta(epoch)  # 调整 theta
     model.train()
 
     batch_time = AverageMeter()
@@ -279,22 +267,22 @@ def train(train_iter, model, criterion, optimizer, epoch, use_cuda):
     end = time.time()
 
     bar = Bar('Processing', max=len(train_iter))
-    for batch_idx, (inputs, targets) in enumerate(train_iter):
+    for batch_idx, (inputs, landmarks, targets) in enumerate(train_iter):
         # measure data loading time
         data_time.update(time.time() - end)
 
         if use_cuda:
-            inputs, targets = inputs.cuda(), targets.cuda()
+            inputs, landmarks, targets = inputs.cuda(), landmarks.cuda(), targets.cuda()
         # inputs, targets = torch.autograd.Variable(inputs), torch.autograd.Variable(targets)
 
         # compute output
-        att_outputs, per_outputs, _ = model(inputs)
-        att_loss = criterion(att_outputs, targets)
-        per_loss = criterion(per_outputs, targets)
-        loss = att_loss + per_loss
+        output_res, output_gcn, outputs = model((inputs, landmarks))
+        per_loss = criterion(outputs, targets)
+        similar_loss = my_cross_entropy(output_res, output_gcn)
+        loss = per_loss + args.theta * similar_loss
 
         # measure accuracy and record loss
-        prec1, prec5 = accuracy(per_outputs.data, targets.data, topk=(1, 5))
+        prec1, prec5 = accuracy(outputs.data, targets.data, topk=(1, 5))
         losses.update(loss.item(), inputs.size(0))
         top1.update(prec1.item(), inputs.size(0))
         top5.update(prec5.item(), inputs.size(0))
@@ -339,19 +327,18 @@ def test(test_iter, model, criterion, epoch, use_cuda):
 
     end = time.time()
     bar = Bar('Processing', max=len(test_iter))
-    for batch_idx, (inputs, targets) in enumerate(test_iter):
+    for batch_idx, (inputs, landmarks, targets) in enumerate(test_iter):
     # measure data loading time
         data_time.update(time.time() - end)
 
         if use_cuda:
-            inputs, targets = inputs.cuda(), targets.cuda()
+            inputs, landmarks, targets = inputs.cuda(), landmarks.cuda(), targets.cuda()
         # inputs, targets = torch.autograd.Variable(inputs, volatile=True), torch.autograd.Variable(targets)
 
         # compute output
-        _, outputs, attention = model(inputs)
+        _, _, outputs = model((inputs, landmarks))
         loss = criterion(outputs, targets)
 
-        print(attention.min(), attention.max())
         """
         np_inputs = inputs.numpy()
         np_att = attention.numpy()
@@ -392,6 +379,7 @@ def save_checkpoint(state, is_best, f_num, checkpoint='checkpoint', filename='ch
     if is_best:
         shutil.copyfile(filepath, os.path.join(checkpoint, 'fold_' + str(f_num) + '_model_best.pth.tar'))
 
+
 def adjust_learning_rate(optimizer, epoch):
     global state
     if epoch in args.schedule:
@@ -400,5 +388,27 @@ def adjust_learning_rate(optimizer, epoch):
             param_group['lr'] = state['lr']
 
 
+def adjust_theta(epoch):
+    global args
+    if epoch + 1 < theta_schedule['start_epoch']:
+        args.theta = 0
+    elif epoch + 1 == theta_schedule['start_epoch']:
+        args.theta = theta_schedule['initial_theta']
+    elif epoch + 1 <= theta_schedule['end_epoch']:
+        args.theta *= theta_schedule['decay_rate']
+    elif epoch + 1 > theta_schedule['end_epoch']:
+        args.theta = 0
+
+
+def my_cross_entropy(output, targt):
+    # targt 不能有梯度
+    targt = targt.detach()
+    soft_output = torch.nn.Softmax(-1)(output)
+    soft_target = torch.nn.Softmax(-1)(targt)
+    # print(soft_output, sof_target)
+    loss = torch.nn.BCELoss()(soft_output, soft_target)
+    return loss
+
 if __name__ == '__main__':
+
     main()

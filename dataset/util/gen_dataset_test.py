@@ -40,7 +40,7 @@ def read_features_labels(file_name):
                                 # if frame_index in frame_extract:
 
                                 # frame_num += 1
-                                img_feature = get_raw_picture(img.path)  # 获取人脸像素
+                                img_feature = precess_image(img.path)  # 获取人脸像素
                                 return
                                 features_one.append(img_feature)
                                 # frame_index += 1
@@ -72,7 +72,6 @@ def rect_to_bbox(rect):
 # 
 def get_raw_picture(img_path):
     img = Image.open(img_path)
-    img.
     img = np.array(img)
     print(img.shape)
 

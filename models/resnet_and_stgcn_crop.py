@@ -1,18 +1,25 @@
-from __future__ import absolute_import
 
-'''Resnet for cifar dataset.
-Ported form
-https://github.com/facebook/fb.resnet.torch
-and
-https://github.com/pytorch/vision/blob/master/torchvision/models/resnet.py
-(c) YANG, Wei
-'''
 import torch
-import torch.nn as nn
+from torch import nn
+import torchvision
+from .st_gcn import Model
 import math
 
+class ResnetOri(nn.Module):
+    def __init__(self, num_classes):
+        super(ResnetOri, self).__init__()
 
-__all__ = ['resnet']
+        model = torchvision.models.resnet18(False)
+        model.avgpool = nn.AdaptiveAvgPool2d(1)
+        model.conv1 = nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+        model.fc = nn.Linear(512, 256)
+        self.resnet = model
+
+    def forward(self, x):
+        out = self.resnet(x)
+        return out
+
+
 
 def conv3x3(in_planes, out_planes, stride=1):
     "3x3 convolution with padding"
@@ -91,10 +98,10 @@ class Bottleneck(nn.Module):
         return out
 
 
-class ResNet(nn.Module):
+class ResnetCrop(nn.Module):
 
     def __init__(self, depth, num_classes=1000):
-        super(ResNet, self).__init__()
+        super(ResnetCrop, self).__init__()
         # Model type specifies number of layers for CIFAR-10 model
         assert (depth - 2) % 6 == 0, 'depth should be 6n+2'
         n = (depth - 2) // 6
@@ -102,29 +109,28 @@ class ResNet(nn.Module):
         block = Bottleneck if depth >=44 else BasicBlock
 
         self.inplanes = 16
-        self.conv1 = nn.Conv2d(1, 16, kernel_size=3, padding=1,  # ckp 是单通道图片，修改输入通道
+        self.conv1 = nn.Conv2d(4, 16, kernel_size=3, padding=1,
                                bias=False)
         self.bn1 = nn.BatchNorm2d(16)
         self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(2)  # 修改项
         self.layer1 = self._make_layer(block, 16, n, down_size=True)
         self.layer2 = self._make_layer(block, 32, n, stride=2, down_size=True)
 
-        self.att_layer3 = self._make_layer(block, 64, n, stride=1, down_size=False)
-        self.bn_att = nn.BatchNorm2d(64 * block.expansion)
-        self.att_conv   = nn.Conv2d(64 * block.expansion, num_classes, kernel_size=1, padding=0,
-                               bias=False)
-        self.bn_att2 = nn.BatchNorm2d(num_classes)
-        self.att_conv2  = nn.Conv2d(num_classes, num_classes, kernel_size=1, padding=0,
-                               bias=False)
-        self.att_conv3  = nn.Conv2d(num_classes, 1, kernel_size=3, padding=1,
-                               bias=False)
-        self.bn_att3 = nn.BatchNorm2d(1)
-        self.att_gap = nn.AvgPool2d(32)  # 修改项
-        self.sigmoid = nn.Sigmoid()
+        # self.att_layer3 = self._make_layer(block, 64, n, stride=1, down_size=False)
+        # self.bn_att = nn.BatchNorm2d(64 * block.expansion)
+        # self.att_conv   = nn.Conv2d(64 * block.expansion, num_classes, kernel_size=1, padding=0,
+        #                        bias=False)
+        # self.bn_att2 = nn.BatchNorm2d(num_classes)
+        # self.att_conv2  = nn.Conv2d(num_classes, num_classes, kernel_size=1, padding=0,
+        #                        bias=False)
+        # self.att_conv3  = nn.Conv2d(num_classes, 1, kernel_size=3, padding=1,
+        #                        bias=False)
+        # self.bn_att3 = nn.BatchNorm2d(1)
+        # self.att_gap = nn.AvgPool2d(16)
+        # self.sigmoid = nn.Sigmoid()
 
         self.layer3 = self._make_layer(block, 64, n, stride=2, down_size=True)
-        self.avgpool = nn.AvgPool2d(16)  # 修改项
+        self.avgpool = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Linear(64 * block.expansion, num_classes)
 
         # print(block, n)
@@ -169,49 +175,74 @@ class ResNet(nn.Module):
     def forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)
-        x = self.relu(x)    # 128
-        x = self.maxpool(x)  # 修改项
+        x = self.relu(x)    # 32x32
 
-        x = self.layer1(x)  # 64
-        x = self.layer2(x)  # 32
+        x = self.layer1(x)  # 32x32
+        x = self.layer2(x)  # 16x16
 
-        ax = self.bn_att(self.att_layer3(x))
-        ax = self.relu(self.bn_att2(self.att_conv(ax)))
-        bs, cs, ys, xs = ax.shape  # 128 6 64 64
-        self.att = self.sigmoid(self.bn_att3(self.att_conv3(ax)))
-        # self.att = self.att.view(bs, 1, ys, xs)
-        ax = self.att_conv2(ax)
-        ax = self.att_gap(ax)
-        ax = ax.view(ax.size(0), -1)
+        # ax = self.bn_att(self.att_layer3(x))
+        # ax = self.relu(self.bn_att2(self.att_conv(ax)))
+        # bs, cs, ys, xs = ax.shape
+        # self.att = self.sigmoid(self.bn_att3(self.att_conv3(ax)))
+        # # self.att = self.att.view(bs, 1, ys, xs)
+        # ax = self.att_conv2(ax)
+        # ax = self.att_gap(ax)
+        # ax = ax.view(ax.size(0), -1)
 
-        rx = x * self.att
-        rx = rx + x
+        # rx = x * self.att
+        # rx = rx + x
+        rx = x
         rx = self.layer3(rx)  # 8x8
         rx = self.avgpool(rx)
         rx = rx.view(rx.size(0), -1)
-        rx = self.fc(rx)
+        # rx = self.fc(rx)
 
-        return ax, rx, self.att
+        return rx
 
-    # def reset_all_weights(self):
-    #     def reset_layer_weights(layer):
-    #         if hasattr(layer, "reset_parameters"):
-    #             layer.reset_parameters()
-    #     self.apply(reset_layer_weights)
+
+class RensnetAndSTGCNAndCrop(nn.Module):
+    def __init__(self, num_classes):
+        super(RensnetAndSTGCNAndCrop, self).__init__()
+
+        self.resnet = ResnetOri(num_classes)
+        self.resnet_crop = ResnetCrop(20, num_classes)
+        self.st_gcn = Model(2, 6, {}, False)
+        self.fc = nn.Linear(576, num_classes)
+
+
+    def forward(self, inputs):
+        img, landmark, crop = inputs
+        feat_img = self.resnet(img)
+        feat_crop = self.resnet_crop(crop)
+        feat_lm = self.st_gcn(landmark)
+        x = torch.cat([feat_img, feat_lm, feat_crop], 1)
+        out = self.fc(x)
+        return out
 
     def reset_all_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.InstanceNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
+        def reset_layer_weights(layer):
+            if hasattr(layer, "reset_parameters"):
+                layer.reset_parameters()
+        self.apply(reset_layer_weights)
 
-                
-def resnet(**kwargs):
-    """
-    Constructs a ResNet model.
-    """
-    return ResNet(**kwargs)
+
+    # def reset_all_weights(self):
+    #     for m in self.modules():
+    #         if isinstance(m, nn.Conv2d):
+    #             nn.init.kaiming_normal_(m.weight)
+    #             if m.bias is not None:
+    #                 nn.init.zeros_(m.bias)
+    #         elif isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.InstanceNorm2d):
+    #             m.weight.data.fill_(1)
+    #             m.bias.data.zero_()
+    
+
+
+if __name__ == '__main__':
+    img = torch.rand((32, 1, 128, 128), dtype=torch.float)
+    crop = torch.rand((32, 4, 24, 32), dtype=torch.float)
+    lm = torch.rand((32, 2, 1, 51), dtype=torch.float)
+    model = RensnetAndSTGCNAndCrop(num_classes=6)
+    out = model((img, lm, crop))
+    print(model)
+    print(out.size())
