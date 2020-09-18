@@ -20,24 +20,22 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 # import models.cifar as models
 from models.resnet_ori import ResnetOri
-
-from models import ResNetAndGCN
-
 import numpy as np
 from utils import Bar, Logger, AverageMeter, accuracy, mkdir_p, savefig, pickle_2_img_single, pickle_2_img_and_landmark
 import logging
 import matplotlib.pyplot as plt 
+from dataset import SFEW
 
 
-parser = argparse.ArgumentParser(description='PyTorch ckp Training')
+parser = argparse.ArgumentParser(description='PyTorch SFEW Training')
 # Datasets
-parser.add_argument('-d', '--dataset', default='ckp', type=str)
-parser.add_argument('--dataset-path', default='data\ck+_6_classes_img_and_55_landmark_4_crop.pickle')  # windows style
+parser.add_argument('-d', '--dataset', default='SFEW', type=str)
+parser.add_argument('--dataset-path', default='data\oulu_6_classes_img_and_55_landmark.pickle')  # windows style
 # parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
 #                     help='number of data loading workers (default: 4)')
 parser.add_argument('-f', '--folds', default=10, type=int, help='k-folds cross validation.')
 # Optimization options
-parser.add_argument('--epochs', default=100, type=int, metavar='N',
+parser.add_argument('--epochs', default=50, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -57,7 +55,7 @@ parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
 parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
 # Checkpoints
-parser.add_argument('-c', '--checkpoint', default='checkpoints/ckp_resnet_ori', type=str, metavar='PATH',
+parser.add_argument('-c', '--checkpoint', default='checkpoints/SFEW_resnet_ori', type=str, metavar='PATH',
                     help='path to save checkpoint (default: checkpoint)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
@@ -80,7 +78,7 @@ args = parser.parse_args()
 state = {k: v for k, v in args._get_kwargs()}
 
 # Validate dataset
-assert args.dataset == 'ckp', 'Dataset can only be ckp.'
+assert args.dataset == 'oulu', 'Dataset can only be ckp.'
 
 # Use CUDA
 # os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
@@ -114,7 +112,6 @@ def main():
     # Model
     print("==> creating model '{}'".format(args.arch))
     model = ResnetOri(num_classes=num_classes)
-    # model = ResNetAndGCN(20, num_classes=num_classes)
 
     # model = torch.nn.DataParallel(model).cuda()
     model = model.cuda()

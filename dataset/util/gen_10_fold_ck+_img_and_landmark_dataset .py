@@ -46,7 +46,9 @@ def read_features_labels(label_abs_path, root_path):
     return features_img, features_lm, labels
                         
 
-def face_align_and_landmark(img_path):
+def face_align_and_landmark(img_path, img_size=(128, 128)):
+    rows, cols = img_size
+
     image_array = cv2.imread(img_path)
     face_landmarks_list = face_recognition.face_landmarks(image_array, model="large")
     face_landmarks_dict = face_landmarks_list[0]
@@ -56,7 +58,8 @@ def face_align_and_landmark(img_path):
     transferred_landmarks = transfer_landmark(face_landmarks_dict, left, top)
     cropped_face, transferred_landmarks = resize_img_and_landmark(cropped_face, transferred_landmarks)
     
-
+    # 灰度化
+    cropped_face = np.array(Image.fromarray(cropped_face).convert('L'))
 
     # 除去下颚的特征点,一共55个特征点
     list_landmarks = []
@@ -67,8 +70,23 @@ def face_align_and_landmark(img_path):
     # plt.imshow(cropped_face)
     # plt.show()
 
+    # 特征点转下标
+    lm_index = []
+
+    for j in range(len(list_landmarks)):
+        patch_group = []
+        patch_group.append(list_landmarks[j, 1] * cols + list_landmarks[j])  # 中心
+        patch_group.append((list_landmarks[j, 1] - 1) * cols + list_landmarks[j, 0] - 1)  # 左上角
+        patch_group.append((list_landmarks[j, 1] - 1) * cols + list_landmarks[j, 0])  # 上方
+        patch_group.append((list_landmarks[j, 1] - 1) * cols + list_landmarks[j, 0] + 1)  # 右上角
+        patch_group.append((list_landmarks[j, 1]) * cols + list_landmarks[j, 0] - 1)  # 左侧
+        patch_group.append((list_landmarks[j, 1]) * cols + list_landmarks[j, 0] + 1)  # 右侧
+        patch_group.append((list_landmarks[j, 1] + 1) * cols + list_landmarks[j, 0] - 1)  # 左下角
+        patch_group.append((list_landmarks[j, 1] + 1) * cols + list_landmarks[j, 0])  # 下方
+        patch_group.append((list_landmarks[j, 1] + 1) * cols + list_landmarks[j, 0] + 1)  # 右下角
+
     # visualize_landmark(cropped_face, list_landmarks)
-    return cropped_face[:, :, 0], np.stack(list_landmarks, axis=1)
+    return cropped_face, np.stack(list_landmarks, axis=1)
 
 
 def resize_img_and_landmark(image_array, landmarks):

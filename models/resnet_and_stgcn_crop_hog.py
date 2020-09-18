@@ -310,7 +310,12 @@ class RensnetAndSTGCNAndCropHOG(nn.Module):
 
         self.resnet_hog = ResnetHog(20, num_classes)
         # self.resnet = ResnetOri(num_classes)
-        self.resnet_crop = ResnetCrop(20, num_classes)
+        self.resnet_leye = ResnetCrop(20, num_classes)
+        self.resnet_reye = ResnetCrop(20, num_classes)
+        self.resnet_nose = ResnetCrop(20, num_classes)
+        self.resnet_lip = ResnetCrop(20, num_classes)
+
+
         self.st_gcn = Model(2, 6, {}, False)
         self.fc1 = nn.Linear(576, 256)
         self.fc2 = nn.Linear(256, num_classes)
@@ -319,10 +324,10 @@ class RensnetAndSTGCNAndCropHOG(nn.Module):
     def forward(self, inputs):
         img, landmark, leye, reye, nose, lip = inputs
         feat_img = self.resnet_hog(img)
-        feat_leye = self.resnet_crop(leye)
-        feat_reye = self.resnet_crop(reye)
-        feat_nose = self.resnet_crop(nose)
-        feat_lip = self.resnet_crop(lip)
+        feat_leye = self.resnet_leye(leye)
+        feat_reye = self.resnet_reye(reye)
+        feat_nose = self.resnet_nose(nose)
+        feat_lip = self.resnet_lip(lip)
         feat_lm = self.st_gcn(landmark)
         x = torch.cat([feat_img, feat_lm, feat_leye, feat_reye, feat_nose, feat_lip], 1)
         out = self.fc1(x)

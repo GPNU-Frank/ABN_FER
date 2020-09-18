@@ -19,10 +19,7 @@ import torch.utils.data as data
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 # import models.cifar as models
-from models.resnet_ori import ResnetOri
-
 from models import ResNetAndGCN
-
 import numpy as np
 from utils import Bar, Logger, AverageMeter, accuracy, mkdir_p, savefig, pickle_2_img_single, pickle_2_img_and_landmark
 import logging
@@ -37,19 +34,19 @@ parser.add_argument('--dataset-path', default='data\ck+_6_classes_img_and_55_lan
 #                     help='number of data loading workers (default: 4)')
 parser.add_argument('-f', '--folds', default=10, type=int, help='k-folds cross validation.')
 # Optimization options
-parser.add_argument('--epochs', default=100, type=int, metavar='N',
+parser.add_argument('--epochs', default=70, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('--train-batch', default=16, type=int, metavar='N',
+parser.add_argument('--train-batch', default=4, type=int, metavar='N',
                     help='train batchsize')
-parser.add_argument('--test-batch', default=16, type=int, metavar='N',
+parser.add_argument('--test-batch', default=4, type=int, metavar='N',
                     help='test batchsize')
 parser.add_argument('--lr', '--learning-rate', default=0.005, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--drop', '--dropout', default=0, type=float,
                     metavar='Dropout', help='Dropout ratio')
-parser.add_argument('--schedule', type=int, nargs='+', default=[50, 75],
+parser.add_argument('--schedule', type=int, nargs='+', default=[30, 60, 75],
                         help='Decrease learning rate at these epochs.')
 parser.add_argument('--gamma', type=float, default=0.8, help='LR is multiplied by gamma on schedule.')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
@@ -57,12 +54,12 @@ parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
 parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
 # Checkpoints
-parser.add_argument('-c', '--checkpoint', default='checkpoints/ckp_resnet_ori', type=str, metavar='PATH',
+parser.add_argument('-c', '--checkpoint', default='checkpoints/ckp_resnet_and_gcn', type=str, metavar='PATH',
                     help='path to save checkpoint (default: checkpoint)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 # Architecture
-parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet')
+parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet_and_gcn')
 parser.add_argument('--depth', type=int, default=20, help='Model depth.')
 parser.add_argument('--cardinality', type=int, default=8, help='Model cardinality (group).')
 parser.add_argument('--widen-factor', type=int, default=4, help='Widen factor. 4 -> 64, 8 -> 128, ...')
@@ -113,8 +110,7 @@ def main():
 
     # Model
     print("==> creating model '{}'".format(args.arch))
-    model = ResnetOri(num_classes=num_classes)
-    # model = ResNetAndGCN(20, num_classes=num_classes)
+    model = ResNetAndGCN(20, num_classes=num_classes)
 
     # model = torch.nn.DataParallel(model).cuda()
     model = model.cuda()
@@ -138,8 +134,6 @@ def main():
         model.load_state_dict(checkpoint['state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer'])
         logger = Logger(os.path.join(args.checkpoint, 'log_stat.log'), title=title, resume=True)
-
-
     else:
         logger = Logger(os.path.join(args.checkpoint, 'log_stat.log'), title=title)
         logger.set_names(['fold_num', 'Learning Rate', 'Train Loss', 'Valid Loss', 'Train Acc.', 'Valid Acc.'])
@@ -159,7 +153,7 @@ def main():
 
         model.reset_all_weights()
         optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-
+        print(args.lr)
         # save each fold's acc and reset configuration
         average_acc = 0
         best_acc = 0
@@ -182,15 +176,17 @@ def main():
         train_x = train_x.unsqueeze(1)  #(b_s, 1, 128, 128)
 
         train_lm = np.stack(train_lm)
-        train_lm = (train_lm - np.mean(train_lm, axis=0)) / np.std(train_lm, axis=0)
-        train_lm = torch.tensor(train_lm, dtype=torch.float)
-        train_lm = train_lm.unsqueeze(2)
+        # 只要坐标信息， 不需要归一化
+        # train_lm = (train_lm - np.mean(train_lm, axis=0)) / np.std(train_lm, axis=0)
+        train_lm = torch.tensor(train_lm, dtype=torch.long)
+        # train_lm = train_lm.unsqueeze(2)
 
         test_x = torch.tensor(test_x, dtype=torch.float) / 255.0
         test_x = test_x.unsqueeze(1)
-        test_lm = (test_lm - np.mean(test_lm, axis=0)) / np.std(test_lm, axis=0)
-        test_lm = torch.tensor(test_lm, dtype=torch.float)
-        test_lm = test_lm.unsqueeze(2)
+        # 只要坐标信息， 不需要归一化
+        # test_lm = (test_lm - np.mean(test_lm, axis=0)) / np.std(test_lm, axis=0)
+        test_lm = torch.tensor(test_lm, dtype=torch.long)
+        # test_lm = test_lm.unsqueeze(2)
         train_y, test_y = torch.tensor(train_y), torch.tensor(test_y)
 
         train_dataset = torch.utils.data.TensorDataset(train_x, train_lm, train_y)
@@ -220,7 +216,7 @@ def main():
         for epoch in range(start_epoch, args.epochs):
             
             # 在特定的epoch 调整学习率
-            # adjust_learning_rate(optimizer, epoch)
+            adjust_learning_rate(optimizer, epoch)
             print('\nEpoch: [%d | %d] LR: %f' % (epoch + 1, args.epochs, state['lr']))
 
             train_loss, train_acc = train(train_iter, model, criterion, optimizer, epoch, use_cuda)
@@ -277,7 +273,7 @@ def train(train_iter, model, criterion, optimizer, epoch, use_cuda):
         # inputs, targets = torch.autograd.Variable(inputs), torch.autograd.Variable(targets)
 
         # compute output
-        per_outputs = model(inputs)
+        per_outputs = model(inputs, landmarks)
         per_loss = criterion(per_outputs, targets)
         loss = per_loss
 
@@ -336,7 +332,7 @@ def test(test_iter, model, criterion, epoch, use_cuda):
         # inputs, targets = torch.autograd.Variable(inputs, volatile=True), torch.autograd.Variable(targets)
 
         # compute output
-        outputs = model(inputs)
+        outputs = model(inputs, landmarks)
         loss = criterion(outputs, targets)
 
         """

@@ -26,19 +26,20 @@ class RensnetAndSTGCNDistill(nn.Module):
 
         self.resnet = ResnetOri(num_classes)
         self.st_gcn = Model(2, 6, {}, False)
-        self.fc = nn.Linear(512, num_classes)
+        # self.fc = nn.Linear(512, num_classes)
         self.fc_res = nn.Linear(256, num_classes)
         self.fc_gcn = nn.Linear(256, num_classes)
+        self.fc = nn.Linear(256, num_classes)
 
     def forward(self, inputs):
         img, landmark = inputs
         feat_img = self.resnet(img)
         feat_lm = self.st_gcn(landmark)
-        x = torch.cat([feat_img, feat_lm], 1)
+        # x = torch.cat([feat_img, feat_lm], 1)
 
         out_res = self.fc_res(feat_img)
         out_gcn = self.fc_gcn(feat_lm)
-        out = self.fc(x)
+        out = self.fc(feat_img * feat_lm)
         return out_res, out_gcn, out
 
     # def reset_all_weights(self):

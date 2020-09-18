@@ -4,7 +4,7 @@ import os
 
 
 class SFEW(Dataset):
-    def __init__(self, root, transform=None): 
+    def __init__(self, root, transform=None, train=True): 
     
         class_num = 7
         label_map = {'Angry': 0, 'Disgust': '1', 'Fear': 2, 'Happy': 3, 'Neutral': 4, 'Sad': 5, 'Surprise': 6}
@@ -37,3 +37,20 @@ class SFEW(Dataset):
 
 
 
+if __name__ == '__main__':
+    train_path = '../data/SFEW/Train/Train_Aligned_Faces/'
+    test_path = '../data/SFEW/Test/Test_Aligned_Faces/'
+
+    import torchvision.transforms as transforms
+
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(
+    mean=[0.485, 0.456, 0.406],
+    std=[0.229, 0.224, 0.225]
+    )
+    ])
+
+    trian_set = SFEW(root=train_path, transform=transform, train=True)
+    print(len(trian_set))
+    train

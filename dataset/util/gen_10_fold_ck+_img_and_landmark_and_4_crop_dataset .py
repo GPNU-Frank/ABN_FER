@@ -12,6 +12,7 @@ import face_recognition
 from collections import defaultdict
 import random
 import math
+from skimage.feature import hog
 os.chdir(sys.path[0])
 
 # 从原始数据集读取特征和标签 取单帧
@@ -23,7 +24,10 @@ def read_features_labels(label_abs_path, root_path):
         raise FileNotFoundError()
     features_img = [[] for i in range(10)]
     features_lm = [[] for i in range(10)]
-    features_crop = [[] for i in range(10)]
+    features_leye = [[] for i in range(10)]
+    features_reye = [[] for i in range(10)]
+    features_nose = [[] for i in range(10)]
+    features_lip = [[] for i in range(10)]
     labels = [[] for i in range(10)]
 
     with open(label_abs_path, 'r') as f:
@@ -38,15 +42,18 @@ def read_features_labels(label_abs_path, root_path):
             label = int(label) - 1
             if label == -1:  # 6 classes 分类
                 continue
-            img, landmark, crop_feature = face_align_and_landmark(root_path + img_path)
+            img, landmark, left_eye_crop, right_eye_crop, nose_crop, lip_crop = face_align_and_landmark(root_path + img_path)
             features_img[fold_index].append(img)
             features_lm[fold_index].append(landmark)
-            features_crop[fold_index].append(crop_feature)
+            features_leye[fold_index].append(left_eye_crop)
+            features_reye[fold_index].append(right_eye_crop)
+            features_nose[fold_index].append(nose_crop)
+            features_lip[fold_index].append(lip_crop)
             labels[fold_index].append(label)
             # print(img.shape, landmark.shape, label)
             # return
             
-    return features_img, features_lm, features_crop, labels
+    return features_img, features_lm, features_leye, features_reye, features_nose, features_lip, labels
                         
 
 def face_align_and_landmark(img_path):
@@ -58,10 +65,13 @@ def face_align_and_landmark(img_path):
     cropped_face, left, top = corp_face(image_array, face_landmarks_dict)
     transferred_landmarks = transfer_landmark(face_landmarks_dict, left, top)
     cropped_face, transferred_landmarks = resize_img_and_landmark(cropped_face, transferred_landmarks)
-    
-    # 灰度化图像
-    cropped_face = np.array(Image.fromarray(cropped_face).convert('L'))
 
+    # 灰度化
+    cropped_face = np.array(Image.fromarray(cropped_face).convert('L'))
+    
+    # hog 特征
+    # normalised_blocks, hog_image = hog(cropped_face, orientations=9, pixels_per_cell=(8, 8), cells_per_block=(8, 8), block_norm='L2-Hys',visualize=True)
+    
     # 裁剪图片 [x, y] x 是横坐标，y 是纵坐标
     img = Image.fromarray(cropped_face)
     # 左眼
@@ -95,7 +105,7 @@ def face_align_and_landmark(img_path):
     nose_crop = img.crop( (nose_left_from_left_eye, nose_top_from_left_eye, nose_right_from_left_eye, nose_bottom))
     # left_eye_crop.show()
     nose_crop = nose_crop.resize((24, 32)) 
-    nose_crop = np.array(nose_crop).transpose((1, 0))
+    nose_crop = np.array(nose_crop)
 
     # 嘴唇
     xy_lip = list(zip(*(transferred_landmarks['top_lip'] + transferred_landmarks['bottom_lip'])))
@@ -107,7 +117,7 @@ def face_align_and_landmark(img_path):
     lip_crop = lip_crop.resize((32, 24))
     lip_crop = np.array(lip_crop)
 
-    crop_features = np.array( [left_eye_crop, right_eye_crop, nose_crop, lip_crop] )
+    # crop_features = np.array( [left_eye_crop, right_eye_crop, nose_crop, lip_crop] )
     # plt.figure(1)
     # plt.imshow(left_eye_crop)
     # plt.figure(2)
@@ -120,6 +130,8 @@ def face_align_and_landmark(img_path):
     # plt.imshow(np.array(img))
     # plt.figure(6)
     # visualize_landmark_ori(cropped_face, transferred_landmarks)
+    # plt.figure(7)
+    # plt.imshow(hog_image)
     # plt.show()
     # return
     # return 
@@ -139,7 +151,7 @@ def face_align_and_landmark(img_path):
     # plt.show()
 
     # visualize_landmark(cropped_face, list_landmarks)
-    return cropped_face, np.stack(list_landmarks, axis=1), crop_features
+    return cropped_face, np.stack(list_landmarks, axis=1), left_eye_crop, right_eye_crop, nose_crop, lip_crop
 
 
 def resize_img_and_landmark(image_array, landmarks):
@@ -236,10 +248,10 @@ if __name__ == '__main__':
     root_path = 'G:/dataset/CKplus10G/'
 
     # 读取数据 原标签是从1开始 所以要减 1, 把标签7改为 类别2, 一共593个表情序列 但能用的只有327个
-    feature_img, feature_lm, feature_crop, labels = read_features_labels(label_abs_path, root_path)
-    print(len(feature_img), len(feature_lm), len(feature_crop), len(labels))
-    print(len(feature_img[0]), len(feature_lm[0]), len(feature_crop[0]), len(labels[0]))
-    print(feature_img[0][0].shape, feature_lm[0][0].shape, feature_crop[0][0].shape, labels[0][0])
+    feature_img, feature_lm, feature_leye, feature_reye, feature_nose, feature_lip, labels = read_features_labels(label_abs_path, root_path)
+    # print(len(feature_img), len(feature_lm), len(feature_crop), len(labels))
+    # print(len(feature_img[0]), len(feature_lm[0]), len(feature_crop[0]), len(labels[0]))
+    # print(feature_img[0][0].shape, feature_lm[0][0].shape, feature_crop[0][0].shape, labels[0][0])
     # exit(0) 
     
 
@@ -249,7 +261,10 @@ if __name__ == '__main__':
             [{
                 'img': feature_img[i],
                 'landmark': feature_lm[i],
-                'crop' : feature_crop[i],
+                'leye' : feature_leye[i],
+                'reye' : feature_reye[i],
+                'nose' : feature_nose[i],
+                'lip' : feature_lip[i],
                 'labels': labels[i]
             } for i in range(10)],
             pfile, pickle.HIGHEST_PROTOCOL
