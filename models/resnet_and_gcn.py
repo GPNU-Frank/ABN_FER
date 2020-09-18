@@ -140,10 +140,13 @@ class ResNetAndGCN(nn.Module):
         self.gcn32 = ConvTemporalGraphical(256, 64, 1)
         # self.avgpool = nn.AvgPool2d(8)
 
+        self.layer4 = self._make_layer(block, 512, n, stride=2, down_size=True)
         self.avgpool = nn.AdaptiveAvgPool2d(1)
 
         # self.fc = nn.Linear(256 * block.expansion, num_classes)
-        self.fc = nn.Linear(256 + 64 * 3, num_classes)
+        self.fc = nn.Linear(512 + 64 * 3, num_classes)
+
+        # self.fc1 = nn.Linear(256, num_classes)
 
         # print(block, n)
         # self.att_layer3 = self._make_layer(block, 64, n, stride=1)
@@ -275,11 +278,15 @@ class ResNetAndGCN(nn.Module):
         x_gcn3 = F.adaptive_avg_pool2d(x_gcn3, 1)
         x_gcn3 = x_gcn3.squeeze(-1).squeeze(-1)
 
+        rx = self.layer4(rx)
         rx = self.avgpool(rx)
         rx = rx.view(rx.size(0), -1)
 
         rx = torch.cat([rx, x_gcn1, x_gcn2, x_gcn3], dim=1)
         rx = self.fc(rx)
+        # rx = F.relu(rx)
+        # rx = F.dropout(rx, 0.7)
+        # rx = self.fc1(rx)
 
         return rx
 

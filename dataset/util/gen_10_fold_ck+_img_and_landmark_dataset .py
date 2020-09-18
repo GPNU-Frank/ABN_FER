@@ -33,9 +33,9 @@ def read_features_labels(label_abs_path, root_path):
             fold_index = int(img_path.split('/')[0][1:]) - 1
             print(img_path, fold_index, label)
             # return
-            label = int(label) - 1
-            if label == -1:  # 6 classes 分类
-                continue
+            label = int(label)
+            # if label == -1:  # 6 classes 分类
+            #     continue
             img, landmark = face_align_and_landmark(root_path + img_path)
             features_img[fold_index].append(img)
             features_lm[fold_index].append(landmark)
@@ -71,19 +71,49 @@ def face_align_and_landmark(img_path, img_size=(128, 128)):
     # plt.show()
 
     # 特征点转下标
-    lm_index = []
+    # lm_index = []
 
-    for j in range(len(list_landmarks)):
-        patch_group = []
-        patch_group.append(list_landmarks[j, 1] * cols + list_landmarks[j])  # 中心
-        patch_group.append((list_landmarks[j, 1] - 1) * cols + list_landmarks[j, 0] - 1)  # 左上角
-        patch_group.append((list_landmarks[j, 1] - 1) * cols + list_landmarks[j, 0])  # 上方
-        patch_group.append((list_landmarks[j, 1] - 1) * cols + list_landmarks[j, 0] + 1)  # 右上角
-        patch_group.append((list_landmarks[j, 1]) * cols + list_landmarks[j, 0] - 1)  # 左侧
-        patch_group.append((list_landmarks[j, 1]) * cols + list_landmarks[j, 0] + 1)  # 右侧
-        patch_group.append((list_landmarks[j, 1] + 1) * cols + list_landmarks[j, 0] - 1)  # 左下角
-        patch_group.append((list_landmarks[j, 1] + 1) * cols + list_landmarks[j, 0])  # 下方
-        patch_group.append((list_landmarks[j, 1] + 1) * cols + list_landmarks[j, 0] + 1)  # 右下角
+    # length = len(list_landmarks)
+    # dist_matrix = []
+    # edge = []
+    # for i in range(length):
+    #     rows = []
+    #     for j in range(length):
+    #         if i == j:
+    #             dist = float('inf')
+    #             rows.append((dist, j))
+    #             continue
+    #         dist = math.sqrt( (list_landmarks[i][0] - list_landmarks[j][0]) ** 2 + (list_landmarks[i][1] - list_landmarks[j][1]) ** 2)
+    #         # y = abs(list_landmarks[i][1] - list_landmarks[j][1])
+    #         rows.append((dist, j))
+
+            
+            
+        # sorted_index = sorted(range(length), key=lambda k: rows[k])
+        # rows.sort()
+        # print(rows, sorted_index)
+        # edge = []
+        # for k in range(3):
+        #     edge.append((i, rows[k][1]))
+
+        # print(rows)
+        # print(sorted_index)
+        # print(edge)
+        # dist_matrix.append(edge)
+    # print(edge)
+    # print(dist_matrix)
+    # return 
+    
+        # patch_group = []
+        # patch_group.append(list_landmarks[j, 1] * cols + list_landmarks[j])  # 中心
+        # patch_group.append((list_landmarks[j, 1] - 1) * cols + list_landmarks[j, 0] - 1)  # 左上角
+        # patch_group.append((list_landmarks[j, 1] - 1) * cols + list_landmarks[j, 0])  # 上方
+        # patch_group.append((list_landmarks[j, 1] - 1) * cols + list_landmarks[j, 0] + 1)  # 右上角
+        # patch_group.append((list_landmarks[j, 1]) * cols + list_landmarks[j, 0] - 1)  # 左侧
+        # patch_group.append((list_landmarks[j, 1]) * cols + list_landmarks[j, 0] + 1)  # 右侧
+        # patch_group.append((list_landmarks[j, 1] + 1) * cols + list_landmarks[j, 0] - 1)  # 左下角
+        # patch_group.append((list_landmarks[j, 1] + 1) * cols + list_landmarks[j, 0])  # 下方
+        # patch_group.append((list_landmarks[j, 1] + 1) * cols + list_landmarks[j, 0] + 1)  # 右下角
 
     # visualize_landmark(cropped_face, list_landmarks)
     return cropped_face, np.stack(list_landmarks, axis=1)
@@ -176,10 +206,15 @@ def corp_face(image_array, landmarks):
     return cropped_img, left, top
 
 if __name__ == '__main__':
+
+    # 取平静帧的 landmark 边
+    # img_path = r"‪G:\dataset\CKplus10G\G1\S005_001_00000001.png"
+    # face_align_and_landmark(img_path)
+    # exit(0)
     # 配置参数
     file_name = '../../data/cohn-kanade-images/'
-    save_path = '../../data/ck+_6_classes_img_and_55_landmark.pickle'
-    label_abs_path = 'G:/dataset/CKplus10G/label0to6.txt'
+    save_path = '../../data/ck+_6_classes_img_and_55_landmark_106.pickle'
+    label_abs_path = 'G:/dataset/CKplus10G/CK+106.txt'
     root_path = 'G:/dataset/CKplus10G/'
 
     # 读取数据 原标签是从1开始 所以要减 1, 把标签7改为 类别2, 一共593个表情序列 但能用的只有327个

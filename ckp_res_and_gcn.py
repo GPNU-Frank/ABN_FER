@@ -51,7 +51,7 @@ parser.add_argument('--schedule', type=int, nargs='+', default=[30, 60, 75],
 parser.add_argument('--gamma', type=float, default=0.8, help='LR is multiplied by gamma on schedule.')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
-parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
+parser.add_argument('--weight-decay', '--wd', default=5e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
 # Checkpoints
 parser.add_argument('-c', '--checkpoint', default='checkpoints/ckp_resnet_and_gcn', type=str, metavar='PATH',
