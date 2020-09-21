@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 parser = argparse.ArgumentParser(description='PyTorch ckp Training')
 # Datasets
 parser.add_argument('-d', '--dataset', default='ckp', type=str)
-parser.add_argument('--dataset-path', default='data\ck+_6_classes_img_and_55_landmark_4_crop.pickle')  # windows style
+parser.add_argument('--dataset-path', default='data\ck+_6_classes_img_and_55_landmark_106.pickle')  # windows style
 # parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
 #                     help='number of data loading workers (default: 4)')
 parser.add_argument('-f', '--folds', default=10, type=int, help='k-folds cross validation.')
@@ -38,20 +38,20 @@ parser.add_argument('--epochs', default=70, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('--train-batch', default=4, type=int, metavar='N',
+parser.add_argument('--train-batch', default=16, type=int, metavar='N',
                     help='train batchsize')
-parser.add_argument('--test-batch', default=4, type=int, metavar='N',
+parser.add_argument('--test-batch', default=16, type=int, metavar='N',
                     help='test batchsize')
 parser.add_argument('--lr', '--learning-rate', default=0.005, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--drop', '--dropout', default=0, type=float,
                     metavar='Dropout', help='Dropout ratio')
-parser.add_argument('--schedule', type=int, nargs='+', default=[30, 60, 75],
+parser.add_argument('--schedule', type=int, nargs='+', default=[30, 50, 70],
                         help='Decrease learning rate at these epochs.')
 parser.add_argument('--gamma', type=float, default=0.8, help='LR is multiplied by gamma on schedule.')
-parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
+parser.add_argument('--momentum', default=0.8, type=float, metavar='M',
                     help='momentum')
-parser.add_argument('--weight-decay', '--wd', default=5e-4, type=float,
+parser.add_argument('--weight-decay', '--wd', default=1e-3, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
 # Checkpoints
 parser.add_argument('-c', '--checkpoint', default='checkpoints/ckp_resnet_and_gcn', type=str, metavar='PATH',
@@ -120,7 +120,7 @@ def main():
     # print('    stgcn params: %.2fM' % (sum(p.numel() for p in model.st_gcn.parameters())/1000000.0))
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-
+    # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     # Resume
     title = 'ckp-' + args.arch
     if args.resume:
@@ -149,10 +149,12 @@ def main():
         logging.info((arg, str(getattr(args, arg))))
 
     acc_fold = []
+    reset_lr = state['lr']
     for f_num in range(args.folds):
-
+        state['lr'] = reset_lr
         model.reset_all_weights()
         optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+        # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
         print(args.lr)
         # save each fold's acc and reset configuration
         average_acc = 0
@@ -202,6 +204,9 @@ def main():
             batch_size=args.test_batch,
             shuffle=False
         )
+
+        # test for fold order
+        print(len(test_dataset))
 
         if args.evaluate:
             print('\nEvaluation only')
