@@ -12,48 +12,70 @@ import face_recognition
 from collections import defaultdict
 import random
 import math
+from skimage.feature import hog
 os.chdir(sys.path[0])
 
 # 从原始数据集读取特征和标签 取单帧
 def read_features_labels(label_abs_path, root_path):
-    cnt = 0
-    # min_frame_num = 100
-    # min_path = ''
+    emo_dict = {'Anger': 0, 'Disgust': 1, 'Fear': 2, 'Happiness': 3, 'Sadness': 4, 'Surprise': 5}
+    optical_condition = {'Dark': 0, 'Strong': 1, 'Weak': 2}
+    tripet_data = []  # (img, landmark, label) 用于分fold
+
     if not os.path.isfile(label_abs_path):
         raise FileNotFoundError()
-    features_img = [[] for i in range(10)]
-    features_lm = [[] for i in range(10)]
-    labels = [[] for i in range(10)]
 
+    features_img = [[] for _ in range(480)]
+    features_lm_geo = [[] for _ in range(480)]
+    features_lm_hog = [[] for _ in range(480)]
+    labels = [[] for _ in range(480)]
     with open(label_abs_path, 'r') as f:
         lines = f.readlines()
 
-        for line in lines:
+        cnt = 0
+
+        for idx, line in enumerate(lines):
             img_path, label = line.split()
-            fold_index = int(img_path.split('/')[0][1:]) - 1
-            print(img_path, fold_index, label)
-            # return
+
+            _, person, emotion, number = img_path.split('\\')
+
+            person = int(person[1:])
             label = int(label)
-            # if label == -1:  # 6 classes 分类
-            #     continue
-            img, landmark = face_align_and_landmark(root_path + img_path)
-            features_img[fold_index].append(img)
-            features_lm[fold_index].append(landmark)
-            labels[fold_index].append(label)
-            # print(img.shape, landmark.shape, label)
-            # return
+            img_abs_path = root_path + '/' + img_path
+
+            cnt += 1
+
+            print(cnt, img_abs_path, label)
+
+            img_array, point_g, point_h = face_align_and_landmark(img_abs_path)
+
+            features_img[idx // 3].append(img_array)
+            features_lm_geo[idx // 3].append(point_g)
+            features_lm_hog[idx // 3].append(point_h)
+            labels[idx // 3] = label
             
-    return features_img, features_lm, labels
+            # if cnt == 36:
+            #     features_img = features_img[: (cnt + 1) // 3]
+            #     features_lm_geo = features_lm_geo[: (cnt + 1) // 3]
+            #     features_lm_hog = features_lm_hog[: (cnt + 1) // 3]
+            #     labels = labels[:(cnt + 1) // 3]
+            #     break
+                
+        features_img = np.array(features_img)
+        features_lm_geo = np.array(features_lm_geo)
+        features_lm_hog = np.array(features_lm_hog)
+        labels = np.array(labels)
+        features_img = features_img.transpose((0, 2, 3, 1))
+        features_lm_geo = features_lm_geo.transpose((0, 2, 1, 3))
+        features_lm_hog = features_lm_hog.transpose((0, 2, 1, 3))
+        # labels = labels.reshape((-1, 3))
+
+    return list(zip(features_img, features_lm_geo, features_lm_hog, labels))
                         
 
-def face_align_and_landmark(img_path, img_size=(224, 224)):
-    rows, cols = img_size
-
+def face_align_and_landmark(img_path):
     image_array = cv2.imread(img_path)
     face_landmarks_list = face_recognition.face_landmarks(image_array, model="large")
     face_landmarks_dict = face_landmarks_list[0]
-    # print(face_landmarks_dict)
-    # return
     cropped_face, left, top = corp_face(image_array, face_landmarks_dict)
     transferred_landmarks = transfer_landmark(face_landmarks_dict, left, top)
     cropped_face, transferred_landmarks = resize_img_and_landmark(cropped_face, transferred_landmarks)
@@ -61,69 +83,44 @@ def face_align_and_landmark(img_path, img_size=(224, 224)):
     # 灰度化
     cropped_face = np.array(Image.fromarray(cropped_face).convert('L'))
 
+    # print(transferred_landmarks)
+    # return
     # 除去下颚的特征点,一共55个特征点
+    # list_landmarks = []
+    # for key in transferred_landmarks.keys():
+    #     if key != 'chin':
+    #         list_landmarks.extend(transferred_landmarks[key])
     list_landmarks = []
+    hog_landmarks = []
+
+    # hog 特征
+    normalised_blocks, hog_image = hog(cropped_face, orientations=9, pixels_per_cell=(6, 6), cells_per_block=(2, 2), block_norm='L2-Hys', visualize=True, feature_vector=False)
+    
+    bin_size = 6
     for key in transferred_landmarks.keys():
         if key != 'chin':
-            list_landmarks.extend(transferred_landmarks[key])
+            for x, y in transferred_landmarks[key]:
+                # list_landmarks.extend((x,y))
+
+                # x, y 和 patch 分开
+                patch_group = []
+                block_y = y // bin_size
+                block_x = x // bin_size
+                list_landmarks.append([x, y])
+                hog_landmarks.append(normalised_blocks[block_y][block_x].flatten())
     # print(len(list_landmarks))
     # plt.imshow(cropped_face)
     # plt.show()
 
-    # 特征点转下标
-    # lm_index = []
-
-    # length = len(list_landmarks)
-    # dist_matrix = []
-    # edge = []
-    # for i in range(length):
-    #     rows = []
-    #     for j in range(length):
-    #         if i == j:
-    #             dist = float('inf')
-    #             rows.append((dist, j))
-    #             continue
-    #         dist = math.sqrt( (list_landmarks[i][0] - list_landmarks[j][0]) ** 2 + (list_landmarks[i][1] - list_landmarks[j][1]) ** 2)
-    #         # y = abs(list_landmarks[i][1] - list_landmarks[j][1])
-    #         rows.append((dist, j))
-
-            
-            
-        # sorted_index = sorted(range(length), key=lambda k: rows[k])
-        # rows.sort()
-        # print(rows, sorted_index)
-        # edge = []
-        # for k in range(3):
-        #     edge.append((i, rows[k][1]))
-
-        # print(rows)
-        # print(sorted_index)
-        # print(edge)
-        # dist_matrix.append(edge)
-    # print(edge)
-    # print(dist_matrix)
-    # return 
-    
-        # patch_group = []
-        # patch_group.append(list_landmarks[j, 1] * cols + list_landmarks[j])  # 中心
-        # patch_group.append((list_landmarks[j, 1] - 1) * cols + list_landmarks[j, 0] - 1)  # 左上角
-        # patch_group.append((list_landmarks[j, 1] - 1) * cols + list_landmarks[j, 0])  # 上方
-        # patch_group.append((list_landmarks[j, 1] - 1) * cols + list_landmarks[j, 0] + 1)  # 右上角
-        # patch_group.append((list_landmarks[j, 1]) * cols + list_landmarks[j, 0] - 1)  # 左侧
-        # patch_group.append((list_landmarks[j, 1]) * cols + list_landmarks[j, 0] + 1)  # 右侧
-        # patch_group.append((list_landmarks[j, 1] + 1) * cols + list_landmarks[j, 0] - 1)  # 左下角
-        # patch_group.append((list_landmarks[j, 1] + 1) * cols + list_landmarks[j, 0])  # 下方
-        # patch_group.append((list_landmarks[j, 1] + 1) * cols + list_landmarks[j, 0] + 1)  # 右下角
-
     # visualize_landmark(cropped_face, list_landmarks)
-    return cropped_face, np.stack(list_landmarks, axis=1)
+    return cropped_face, np.stack(list_landmarks, axis=1), np.stack(hog_landmarks, axis=1)
 
 
-def resize_img_and_landmark(image_array, landmarks, img_size=(224, 224)):
+def resize_img_and_landmark(image_array, landmarks):
     img_crop = Image.fromarray(image_array)
     ori_size = img_crop.size
-    img_crop = img_crop.resize((img_size[0], img_size[1]))
-    ratio = (img_size[0] / ori_size[0], img_size[1] / ori_size[1])
+    img_crop = img_crop.resize((224, 224))
+    ratio = (224 / ori_size[0], 224 / ori_size[1])
     transferred_landmarks = defaultdict(list)
 
     for facial_feature in landmarks.keys():
@@ -133,19 +130,6 @@ def resize_img_and_landmark(image_array, landmarks, img_size=(224, 224)):
     img_crop = np.array(img_crop)
     return img_crop, transferred_landmarks
 
-def visualize_landmark_ori(image_array, landmarks):
-    """ plot landmarks on image
-    :param image_array: numpy array of a single image
-    :param landmarks: dict of landmarks for facial parts as keys and tuple of coordinates as values
-    :return: plots of images with landmarks on
-    """
-    origin_img = Image.fromarray(image_array)
-    draw = ImageDraw.Draw(origin_img)
-    for facial_feature in landmarks.keys():
-        draw.point(landmarks[facial_feature])
-        for id, points in enumerate(landmarks[facial_feature]):
-            draw.text(points, str(id))
-    plt.imshow(origin_img)
 
 def visualize_landmark(image_array, landmarks):
     """ plot landmarks on image
@@ -206,32 +190,49 @@ def corp_face(image_array, landmarks):
     return cropped_img, left, top
 
 if __name__ == '__main__':
-
-    # 取平静帧的 landmark 边
-    # img_path = r"‪G:\dataset\CKplus10G\G1\S005_001_00000001.png"
-    # face_align_and_landmark(img_path)
-    # exit(0)
     # 配置参数
-    file_name = '../../data/cohn-kanade-images/'
-    save_path = '../../data/ck+_6_classes_img_and_55_landmark_106_224.pickle'
-    label_abs_path = 'G:/dataset/CKplus10G/CK+106.txt'
-    root_path = 'G:/dataset/CKplus10G/'
+    # file_name = '../../data/cohn-kanade-images/'
+    save_path = '../../data/oulu_6_classes_img_and_55_landmark_3frames_A+G.pickle'
+    # label_abs_path = 'G:/dataset/CKplus10G/label0to6.txt'
+    root_path = 'G:/dataset/OuluCasIA/OriginalImg/VL'
+    label_path = 'G:/dataset/OuluCasIA/OriginalImg/VL/fusion_label6strong.txt'
+    test_path = '../../data/oulu_6_classes_img_and_55_landmark_test.pickle'
 
-    # 读取数据 原标签是从1开始 所以要减 1, 把标签7改为 类别2, 一共593个表情序列 但能用的只有327个
-    feature_img, feature_lm, labels = read_features_labels(label_abs_path, root_path)
-    print(len(feature_img), len(feature_lm), len(labels))
-    print(len(feature_img[0]), len(feature_lm[0]), len(labels[0]))
-    print(feature_img[0][0].shape, feature_lm[0][0].shape, labels[0][0])
-    # exit(0) 
+    # test
+    # face_align_and_landmark('G:/dataset/OuluCasIA/OriginalImg/VL/Strong\P013\Disgust\\005.jpeg')
+    # exit()
+
+    tripet_data = read_features_labels(label_path, root_path)
+    len_data = len(tripet_data)
+    print(len_data)
+    # 打乱并分 10 fold
+    random.shuffle(tripet_data)
+    data_fold = []
+    fold, fold_num = 10, 48
+    # start = 0
+    for i in range(0, len_data, fold_num):
+        data_fold.append(tripet_data[i: min(i + fold_num, len_data)])  # (10, 119, 3)
+    data_fold_transpose = [[[] for j in range(4) ] for i in range(10)]  # 放每个人的所有图片
+    for fold in range(10):
+        for in_fold in range(len(data_fold[fold])):
+            for tri_index in range(4):
+                data_fold_transpose[fold][tri_index].append(data_fold[fold][in_fold][tri_index])
     
 
     # 存入 pickle 文件
     with open(save_path, 'wb') as pfile:
         pickle.dump(
             [{
-                'img': feature_img[i],
-                'landmark': feature_lm[i],
-                'labels': labels[i]
+                'img': data_fold_transpose[i][0],
+                'landmark_geo': data_fold_transpose[i][1],
+                'landmark_hog': data_fold_transpose[i][2],
+                'labels': data_fold_transpose[i][3]
             } for i in range(10)],
             pfile, pickle.HIGHEST_PROTOCOL
         )
+    # # 测试
+    # with open(test_path, 'wb') as pfile:
+    #     pickle.dump(
+    #         data_fold,
+    #         pfile, pickle.HIGHEST_PROTOCOL
+    #     )

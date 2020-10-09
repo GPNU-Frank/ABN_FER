@@ -32,12 +32,12 @@ import matplotlib.pyplot as plt
 parser = argparse.ArgumentParser(description='PyTorch ckp Training')
 # Datasets
 parser.add_argument('-d', '--dataset', default='ckp', type=str)
-parser.add_argument('--dataset-path', default='data\ck+_6_classes_img_and_55_landmark_4_crop.pickle')  # windows style
+parser.add_argument('--dataset-path', default='data\ck+_6_classes_img_and_55_landmark_106.pickle')  # windows style
 # parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
 #                     help='number of data loading workers (default: 4)')
 parser.add_argument('-f', '--folds', default=10, type=int, help='k-folds cross validation.')
 # Optimization options
-parser.add_argument('--epochs', default=100, type=int, metavar='N',
+parser.add_argument('--epochs', default=60, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -57,7 +57,7 @@ parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
 parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
 # Checkpoints
-parser.add_argument('-c', '--checkpoint', default='checkpoints/ckp_resnet_ori', type=str, metavar='PATH',
+parser.add_argument('-c', '--checkpoint', default='checkpoints/ckp_resnet_ori_shuffle', type=str, metavar='PATH',
                     help='path to save checkpoint (default: checkpoint)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')

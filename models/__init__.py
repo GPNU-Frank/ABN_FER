@@ -4,3 +4,11 @@ from .resnet_and_stgcn_crop import *
 from .st_gcn import *
 from .resnet_and_stgcn_crop_hog import *
 from .resnet_and_gcn import *
+from .resnet_and_resgcn import *
+from .resnet_and_dgcnn import *
+from .graph_similarity import *
+from .resnet_cbam import *
+from .dgcnn import *
+from .st_gcn_att import *
+from .st_gcn_AG import *
+from .st_gcn_AG_att import *

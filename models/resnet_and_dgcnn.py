@@ -7,10 +7,12 @@ import math
 from torch.nn import Module
 from torch.nn.parameter import Parameter
 
-from .utils.graph import Graph
-from .utils.tgcn import ConvTemporalGraphical
+# from .utils.graph import Graph
+# from .utils.tgcn import ConvTemporalGraphical
 
 import torch.nn.functional as F
+from collections import OrderedDict
+
 
 # __all__ = ['resnet']
 
@@ -91,21 +93,17 @@ class Bottleneck(nn.Module):
         return out
 
 
-class ResNetAndGCN(nn.Module):
+class ResNetAndDGCNN(nn.Module):
 
     def __init__(self, depth, num_classes=1000, gcn_hidden=512, gcn_out=64, dropout=0.5):
-        super(ResNetAndGCN, self).__init__()
+        super(ResNetAndDGCNN, self).__init__()
         # Model type specifies number of layers for CIFAR-10 model
         assert (depth - 2) % 6 == 0, 'depth should be 6n+2'
         n = (depth - 2) // 6
 
         block = Bottleneck if depth >=44 else BasicBlock
 
-        graph = Graph({})
-        self.A = torch.tensor(graph.A, dtype=torch.float32, requires_grad=False)
-        self.A = self.A.cuda()
 
-        # self.graph = Graph({})
 
         self.inplanes = 64
         self.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3,
@@ -114,62 +112,11 @@ class ResNetAndGCN(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         self.layer1 = self._make_layer(block, 64, n, down_size=True)
 
-        self.gcn11 = ConvTemporalGraphical(64, 256, 1)
-        self.bn11 = nn.BatchNorm2d(256)
-        self.gcn12 = ConvTemporalGraphical(256, 64, 1)
-        self.bn12 = nn.BatchNorm2d(64)
-
-        self.layer2 = self._make_layer(block, 128, n, stride=2, down_size=True)
-        # self.upsample2 = nn.functional.upsample()
-        self.gcn21 = ConvTemporalGraphical(128, 256, 1)
-        self.bn21 = nn.BatchNorm2d(256)
-        self.gcn22 = ConvTemporalGraphical(256, 64, 1)
-        self.bn22 = nn.BatchNorm2d(64)
-
-        # self.att_layer3 = self._make_layer(block, 64, n, stride=1, down_size=False)
-        # self.bn_att = nn.BatchNorm2d(64 * block.expansion)
-        # self.att_conv   = nn.Conv2d(64 * block.expansion, num_classes, kernel_size=1, padding=0,
-        #                        bias=False)
-        # self.bn_att2 = nn.BatchNorm2d(num_classes)
-        # self.att_conv2  = nn.Conv2d(num_classes, num_classes, kernel_size=1, padding=0,
-        #                        bias=False)
-        # self.att_conv3  = nn.Conv2d(num_classes, 1, kernel_size=3, padding=1,
-        #                        bias=False)
-        # self.bn_att3 = nn.BatchNorm2d(1)
-        # self.att_gap = nn.AvgPool2d(16)
-        self.sigmoid = nn.Sigmoid()
-
-        self.layer3 = self._make_layer(block, 256, n, stride=2, down_size=True)
-
-        self.gcn31 = ConvTemporalGraphical(256, 256, 1)
-        self.bn31 = nn.BatchNorm2d(256)
-        self.gcn32 = ConvTemporalGraphical(256, 64, 1)
-        self.bn32 = nn.BatchNorm2d(64)
-        # self.avgpool = nn.AvgPool2d(8)
-
-        self.layer4 = self._make_layer(block, 512, n, stride=2, down_size=True)
-        self.avgpool = nn.AdaptiveAvgPool2d(1)
-
-        # self.fc = nn.Linear(256 * block.expansion, num_classes)
-        self.fc1 = nn.Linear(512 + 64 * 3, 256)
-        self.bn_f1 = nn.BatchNorm1d(256)
-        self.drop_f1 = nn.Dropout(0.5)
-        self.fc2 = nn.Linear(256, num_classes)
-        # self.fc1 = nn.Linear(256, num_classes)
-
-        # print(block, n)
-        # self.att_layer3 = self._make_layer(block, 64, n, stride=1)
-        # self.att_conv   = nn.Conv2d(64, num_classes, kernel_size=3, padding=1,
-        #                        bias=False)
-        # self.att_gap = nn.AvgPool2d(16)
-
-        # for m in self.modules():
-        #     if isinstance(m, nn.Conv2d):
-        #         n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-        #         m.weight.data.normal_(0, math.sqrt(2. / n))
-        #     elif isinstance(m, nn.BatchNorm2d):
-        #         m.weight.data.fill_(1)
-        #         m.bias.data.zero_()
+        self.edge_conv_1 = EdgeConv(layers=[2, 256, 256, 64])
+        self.edge_conv_2 = EdgeConv(layers=[64, 128])
+        self.conv_block = conv_bn_block(128, 1024, 1)
+        self.fc_block = fc_bn_block(1024, 512)
+        self.fc = nn.Linear(512, num_classes)
 
     def _make_layer(self, block, planes, blocks, stride=1, down_size=True):
         downsample = None
@@ -194,7 +141,6 @@ class ResNetAndGCN(nn.Module):
                 layers.append(block(inplanes, planes))
 
             return nn.Sequential(*layers)
-
 
     def get_landmark_feature(self, feature_map, landmark, ratio=1, img_size=(128, 128)):
         # feature_map: bz, c, h, w
@@ -243,80 +189,30 @@ class ResNetAndGCN(nn.Module):
             nodes = nodes.unsqueeze(2)
             return nodes
 
+
     def forward(self, x, landmark):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)    # 128 * 128
+        # x = self.conv1(x)
+        # x = self.bn1(x)
+        # x = self.relu(x)
 
-        x = self.layer1(x)  # 128 * 128
-        bz, c, h, w = x.size()
-        # x = F.upsample(x, (128, 128))
-        node1 = self.get_landmark_feature(x, landmark, ratio=2)
-        x_gcn1, _ = self.gcn11(node1, self.A)
-        x_gcn1 = self.bn11(x_gcn1)
-        x_gcn1 = self.relu(x_gcn1)
+        # x = self.layer1(x)
 
-        x_gcn1, _ = self.gcn12(x_gcn1, self.A)
-        x_gcn1 = self.bn12(x_gcn1)
-        x_gcn1 = self.relu(x_gcn1)
-        x_gcn1 = F.adaptive_avg_pool2d(x_gcn1, 1)
-        x_gcn1 = x_gcn1.squeeze(-1).squeeze(-1)
+        # node = self.get_landmark_feature(x, landmark, ratio=2)
+        # node = node.squeeze(2)
+        landmark = landmark.permute(0, 2, 1)
+        B, N, C = landmark.shape
 
-        x = self.layer2(x)  # 64 * 64
-        bz, c, h, w = x.size()
-        # x = F.upsample(x, (128, 128))
-        node2 = self.get_landmark_feature(x, landmark, ratio=4)
-        x_gcn2, _ = self.gcn21(node2, self.A)
-        x_gcn2 = self.bn21(x_gcn2)
-        x_gcn2 = self.relu(x_gcn2)
+        x = self.edge_conv_1(landmark)
+        x = self.edge_conv_2(x)
+        x = x.permute(0, 2, 1)
+        x = self.conv_block(x)
+        x = nn.AvgPool1d(N)(x)
+        x = x.squeeze(2)
+        x = self.fc_block(x)
+        x = self.fc(x)
+        return x
 
-        x_gcn2, _ = self.gcn22(x_gcn2, self.A)
-        x_gcn2 = self.bn22(x_gcn2)
-        x_gcn2 = self.relu(x_gcn2)
-        x_gcn2 = F.adaptive_avg_pool2d(x_gcn2, 1)
-        x_gcn2 = x_gcn2.squeeze(-1).squeeze(-1)
 
-        # ax = self.bn_att(self.att_layer3(x))
-        # ax = self.relu(self.bn_att2(self.att_conv(ax)))
-        # bs, cs, ys, xs = ax.shape
-        # self.att = self.sigmoid(self.bn_att3(self.att_conv3(ax)))
-        # # self.att = self.att.view(bs, 1, ys, xs)
-        # ax = self.att_conv2(ax)
-        # ax = self.att_gap(ax)
-        # ax = ax.view(ax.size(0), -1)
-
-        # rx = x * self.att
-        # rx = rx + x
-        rx = x
-        rx = self.layer3(rx)  # 32 * 32
-        bz, c, h, w = rx.size()
-        # rx = F.upsample(rx, (128, 128))
-        node3 = self.get_landmark_feature(rx, landmark, ratio=8)
-        x_gcn3, _ = self.gcn31(node3, self.A)
-        x_gcn3 = self.bn31(x_gcn3)
-        x_gcn3 = self.relu(x_gcn3)
-
-        x_gcn3, _ = self.gcn32(x_gcn3, self.A)
-        x_gcn3 = self.bn32(x_gcn3)
-        x_gcn3 = self.relu(x_gcn3)
-        x_gcn3 = F.adaptive_avg_pool2d(x_gcn3, 1)
-        x_gcn3 = x_gcn3.squeeze(-1).squeeze(-1)
-
-        rx = self.layer4(rx)
-        rx = self.avgpool(rx)
-        rx = rx.view(rx.size(0), -1)
-
-        rx = torch.cat([rx, x_gcn1, x_gcn2, x_gcn3], dim=1)
-        rx = self.fc1(rx)
-        rx = self.bn_f1(rx)
-        rx = self.relu(rx)
-        # rx = self.drop_f1(rx)
-        rx = self.fc2(rx)
-        # rx = F.relu(rx)
-        # rx = F.dropout(rx, 0.7)
-        # rx = self.fc1(rx)
-
-        return rx
 
     def reset_all_weights(self):
         for m in self.modules():
@@ -337,11 +233,162 @@ class ResNetAndGCN(nn.Module):
 #     return ResNet(**kwargs)
 
 
+def conv_bn_block(input, output, kernel_size):
+    '''
+    标准卷积块（conv + bn + relu）
+    :param input: 输入通道数
+    :param output: 输出通道数
+    :param kernel_size: 卷积核大小
+    :return:
+    '''
+    return nn.Sequential(
+        nn.Conv1d(input, output, kernel_size),
+        nn.BatchNorm1d(output),
+        nn.ReLU(inplace=True)
+    )
+
+
+def fc_bn_block(input, output):
+    '''
+    标准全连接块（fc + bn + relu）
+    :param input:  输入通道数
+    :param output:  输出通道数
+    :return:  卷积核大小
+    '''
+    return nn.Sequential(
+        nn.Linear(input, output),
+        nn.BatchNorm1d(output),
+        nn.ReLU(inplace=True)
+    )
+
+
+class EdgeConv(nn.Module):
+    '''
+    EdgeConv模块
+    1. 输入为：n * f
+    2. 创建KNN graph，变为： n * k * f
+    3. 接上若干个mlp层：a1, a2, ..., an
+    4. 最终输出为：n * k * an
+    5. 全局池化，变为： n * an
+    '''
+    def __init__(self, layers, K=3):
+        '''
+        构造函数
+        :param layers: e.p. [3, 64, 64, 64]
+        :param K:
+        '''
+        super(EdgeConv, self).__init__()
+
+        self.K = K
+        self.layers = layers
+        # self.KNN_Graph = torch.zeros(Args.batch_size, 2048, self.K, self.layers[0]).to(Args.device)
+
+        if layers is None:
+            self.mlp = None
+        else:
+            mlp_layers = OrderedDict()
+            for i in range(len(self.layers) - 1):
+                if i == 0:
+                    mlp_layers['conv_bn_block_{}'.format(i + 1)] = conv_bn_block(2*self.layers[i], self.layers[i + 1], 1)
+                else:
+                    mlp_layers['conv_bn_block_{}'.format(i+1)] = conv_bn_block(self.layers[i], self.layers[i+1], 1)
+            self.mlp = nn.Sequential(mlp_layers)
+
+    def createSingleKNNGraph(self, X):
+        '''
+        generate a KNN graph for a single point cloud
+        :param X:  X is a Tensor, shape: [N, F]
+        :return: KNN graph, shape: [N, K, F]
+        '''
+        N, F = X.shape
+        assert F == self.layers[0]
+
+        # self.KNN_Graph = np.zeros(N, self.K)
+
+        # 计算距离矩阵
+        dist_mat = torch.pow(X, 2).sum(dim=1, keepdim=True).expand(N, N) + \
+                   torch.pow(X, 2).sum(dim=1, keepdim=True).expand(N, N).t()
+        dist_mat.addmm_(1, -2, X, X.t())
+
+        # 对距离矩阵排序
+        dist_mat_sorted, sorted_indices = torch.sort(dist_mat, dim=1)
+        # print(dist_mat_sorted)
+
+        # 取出前K个（除去本身）
+        knn_indexes = sorted_indices[:, 1:self.K+1]
+        # print(sorted_indices)
+
+        # 创建KNN图
+        knn_graph = X[knn_indexes]
+
+        return knn_graph
+
+    def forward(self, X):
+        '''
+        前向传播函数
+        :param X:  shape: [B, N, F]
+        :return:  shape: [B, N, an]
+        '''
+        # print(X.shape)
+        B, N, F = X.shape
+        assert F == self.layers[0]
+
+        KNN_Graph = torch.zeros(B, N, self.K, self.layers[0]).cuda()
+        # KNN_Graph = torch.zeros(B, N, self.K, self.layers[0])
+
+        # creating knn graph
+        # X: [B, N, F]
+        for idx, x in enumerate(X):
+            # x: [N, F]
+            # knn_graph: [N, K, F]
+            # self.KNN_Graph[idx] = self.createSingleKNNGraph(x)
+            KNN_Graph[idx] = self.createSingleKNNGraph(x)
+        # print(self.KNN_Graph.shape)
+        # print('KNN_Graph: {}'.format(KNN_Graph[0][0]))
+
+        # X: [B, N, F]
+        x1 = X.reshape([B, N, 1, F])
+        x1 = x1.expand(B, N, self.K, F)
+        # x1: [B, N, K, F]
+
+        x2 = KNN_Graph - x1
+        # x2: [B, N, K, F]
+
+        x_in = torch.cat([x1, x2], dim=3)
+        # x_in: [B, N, K, 2*F]
+        x_in = x_in.permute(0, 3, 1, 2)
+        # x_in: [B, 2*F, N, K]
+
+        # reshape, x_in: [B, 2*F, N*K]
+        x_in = x_in.reshape([B, 2 * F, N * self.K])
+
+        # out: [B, an, N*K]
+        out = self.mlp(x_in)
+        _, an, _ = out.shape
+        # print(out.shape)
+
+        out = out.reshape([B, an, N, self.K])
+        # print(out.shape)
+        # reshape, out: [B, an, N, K]
+        out = out.reshape([B, an*N, self.K])
+        # print(out.shape)
+        # reshape, out: [B, an*N, K]
+        out = nn.MaxPool1d(self.K)(out)
+        # print(out.shape)
+        out = out.reshape([B, an, N])
+        # print(out.shape)
+        out = out.permute(0, 2, 1)
+        # print(out.shape)
+
+        return out
+
+
+
 if __name__ == '__main__':
     inputs = torch.rand((32, 1, 128, 128))
     landmarks = torch.randint(0, 128, (32, 2, 55))
 
-    model = ResNetAndGCN(20, num_classes=6)
+    model = ResNetAndDGCNN(20, num_classes=6)
 
     # feature_map = torch.rand((32, 32, 128, 128))
 

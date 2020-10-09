@@ -19,7 +19,7 @@ import torch.utils.data as data
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 # import models.cifar as models
-from models import ResNetAndGCN
+from models import ResNetAndGCN, ResNetAndResGCN
 import numpy as np
 from utils import Bar, Logger, AverageMeter, accuracy, mkdir_p, savefig, pickle_2_img_single, pickle_2_img_and_landmark
 import logging
@@ -34,7 +34,7 @@ parser.add_argument('--dataset-path', default='data\ck+_6_classes_img_and_55_lan
 #                     help='number of data loading workers (default: 4)')
 parser.add_argument('-f', '--folds', default=10, type=int, help='k-folds cross validation.')
 # Optimization options
-parser.add_argument('--epochs', default=50, type=int, metavar='N',
+parser.add_argument('--epochs', default=70, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -46,20 +46,20 @@ parser.add_argument('--lr', '--learning-rate', default=0.005, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--drop', '--dropout', default=0, type=float,
                     metavar='Dropout', help='Dropout ratio')
-parser.add_argument('--schedule', type=int, nargs='+', default=[15, 30, 70],
+parser.add_argument('--schedule', type=int, nargs='+', default=[30, 50, 70],
                         help='Decrease learning rate at these epochs.')
 parser.add_argument('--gamma', type=float, default=0.8, help='LR is multiplied by gamma on schedule.')
 parser.add_argument('--momentum', default=0.8, type=float, metavar='M',
                     help='momentum')
-parser.add_argument('--weight-decay', '--wd', default=1e-3, type=float,
+parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
 # Checkpoints
-parser.add_argument('-c', '--checkpoint', default='checkpoints/ckp_resnet_and_gcn', type=str, metavar='PATH',
+parser.add_argument('-c', '--checkpoint', default='checkpoints/ckp_resnet_and_resgcn', type=str, metavar='PATH',
                     help='path to save checkpoint (default: checkpoint)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 # Architecture
-parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet_and_gcn')
+parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet_and_resgcn')
 parser.add_argument('--depth', type=int, default=20, help='Model depth.')
 parser.add_argument('--cardinality', type=int, default=8, help='Model cardinality (group).')
 parser.add_argument('--widen-factor', type=int, default=4, help='Widen factor. 4 -> 64, 8 -> 128, ...')
@@ -110,7 +110,7 @@ def main():
 
     # Model
     print("==> creating model '{}'".format(args.arch))
-    model = ResNetAndGCN(20, num_classes=num_classes)
+    model = ResNetAndResGCN(20, num_classes=num_classes)
 
     # model = torch.nn.DataParallel(model).cuda()
     model = model.cuda()
@@ -130,12 +130,12 @@ def main():
     #     {'params': model.gcn31.parameters()}, 
     #     {'params': model.gcn32.parameters()}, 
     #     {'params': model.fc.parameters()}, 
-    #     {'params': model.conv1.parameters(), 'lr': 0.005, 'weight_decay': 5e-3},
-    #     {'params': model.bn1.parameters(), 'lr': 0.005, 'weight_decay': 5e-3},
-    #     {'params': model.layer1.parameters(), 'lr': 0.005, 'weight_decay': 5e-3},
-    #     {'params': model.layer2.parameters(), 'lr': 0.005, 'weight_decay': 5e-3},
-    #     {'params': model.layer3.parameters(), 'lr': 0.005, 'weight_decay': 5e-3},
-    #     {'params': model.layer4.parameters(), 'lr': 0.005, 'weight_decay': 5e-3},
+    #     {'params': model.conv1.parameters(), 'lr': 0.005, 'weight_decay': 1e-3},
+    #     {'params': model.bn1.parameters(), 'lr': 0.005, 'weight_decay': 1e-3},
+    #     {'params': model.layer1.parameters(), 'lr': 0.005, 'weight_decay': 1e-3},
+    #     {'params': model.layer2.parameters(), 'lr': 0.005, 'weight_decay': 1e-3},
+    #     {'params': model.layer3.parameters(), 'lr': 0.005, 'weight_decay': 1e-3},
+    #     {'params': model.layer4.parameters(), 'lr': 0.005, 'weight_decay': 1e-3},
     #     ], lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -172,20 +172,20 @@ def main():
         state['lr'] = reset_lr
         model.reset_all_weights()
         # optimizer = optim.SGD([
-        # {'params': model.gcn11.parameters()}, 
-        # {'params': model.gcn12.parameters()}, 
-        # {'params': model.gcn21.parameters()}, 
-        # {'params': model.gcn22.parameters()}, 
-        # {'params': model.gcn31.parameters()}, 
-        # {'params': model.gcn32.parameters()}, 
-        # {'params': model.fc.parameters()}, 
-        # {'params': model.conv1.parameters(), 'lr': 0.005, 'weight_decay': 5e-3},
-        # {'params': model.bn1.parameters(), 'lr': 0.005, 'weight_decay': 5e-3},
-        # {'params': model.layer1.parameters(), 'lr': 0.005, 'weight_decay': 5e-3},
-        # {'params': model.layer2.parameters(), 'lr': 0.005, 'weight_decay': 5e-3},
-        # {'params': model.layer3.parameters(), 'lr': 0.005, 'weight_decay': 5e-3},
-        # {'params': model.layer4.parameters(), 'lr': 0.005, 'weight_decay': 5e-3},
-        # ], lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+        #     {'params': model.gcn11.parameters()}, 
+        #     {'params': model.gcn12.parameters()}, 
+        #     {'params': model.gcn21.parameters()}, 
+        #     {'params': model.gcn22.parameters()}, 
+        #     {'params': model.gcn31.parameters()}, 
+        #     {'params': model.gcn32.parameters()}, 
+        #     {'params': model.fc.parameters()}, 
+        #     {'params': model.conv1.parameters(), 'lr': 0.005, 'weight_decay': 1e-3},
+        #     {'params': model.bn1.parameters(), 'lr': 0.005, 'weight_decay': 1e-3},
+        #     {'params': model.layer1.parameters(), 'lr': 0.005, 'weight_decay': 1e-3},
+        #     {'params': model.layer2.parameters(), 'lr': 0.005, 'weight_decay': 1e-3},
+        #     {'params': model.layer3.parameters(), 'lr': 0.005, 'weight_decay': 1e-3},
+        #     {'params': model.layer4.parameters(), 'lr': 0.005, 'weight_decay': 1e-3},
+        #     ], lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
         optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
         # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
         print(args.lr)
@@ -313,13 +313,7 @@ def train(train_iter, model, criterion, optimizer, epoch, use_cuda):
 
         # compute output
         per_outputs = model(inputs, landmarks)
-
-        # # 采用 L1 正则化
-        # regularization_loss = 0
-        # for param in model.parameters():
-        #     regularization_loss += torch.sum(torch.abs(param))
         per_loss = criterion(per_outputs, targets)
-
         loss = per_loss
 
         # measure accuracy and record loss
@@ -327,7 +321,6 @@ def train(train_iter, model, criterion, optimizer, epoch, use_cuda):
         losses.update(loss.item(), inputs.size(0))
         top1.update(prec1.item(), inputs.size(0))
         top5.update(prec5.item(), inputs.size(0))
-
 
         # compute gradient and do SGD step
         optimizer.zero_grad()

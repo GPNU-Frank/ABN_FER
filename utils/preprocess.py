@@ -86,6 +86,48 @@ def pickle_2_img_and_landmark(data_file):
     return total_x1, total_lm, total_y
 
 
+def pickle_2_img_and_landmark_ag(data_file):
+    if not os.path.exists(data_file):
+        print('file {0} not exists'.format(data_file))
+        exit()
+    with open(data_file, 'rb') as f:
+        data = pickle.load(f)
+    total_x1, total_lm_g, total_lm_h, total_y = [], [], [], []
+    for i in range(len(data)):
+        x1 = []
+        lmg1 = []
+        lmh1 = []
+        yl = []
+        print(len(data[i]['img']))
+        for j in range(len(data[i]['labels'])):
+             
+            img = data[i]['img'][j]
+            # img = ImageBlocks.getImageBlocks(img, 16, 16)
+            
+            landmark_g = data[i]['landmark_geo'][j]
+            landmark_h = data[i]['landmark_hog'][j]
+            label = int(data[i]['labels'][j])
+             
+            if label == 7:
+                label = 2
+            # print(label)
+            # label = dense_to_one_hot(label, 6)
+             
+            #print(label)
+            x1.append(img)
+            lmg1.append(landmark_g)
+            lmh1.append(landmark_h)
+            yl.append(label)
+
+        total_x1.append(x1)
+        total_lm_g.append(lmg1)
+        total_lm_h.append(lmh1)
+        total_y.append(yl)    
+           
+    # exit(1)
+    return total_x1, total_lm_g, total_lm_h, total_y
+
+
 def pickle_2_img_and_landmark_and_crop(data_file):
     if not os.path.exists(data_file):
         print('file {0} not exists'.format(data_file))

@@ -21,10 +21,12 @@ def read_features_labels(label_abs_path, root_path):
     # min_path = ''
     if not os.path.isfile(label_abs_path):
         raise FileNotFoundError()
-    features_img = [[] for i in range(10)]
-    features_lm = [[] for i in range(10)]
-    labels = [[] for i in range(10)]
-
+    # features_img = [[] for i in range(10)]
+    # features_lm = [[] for i in range(10)]
+    # labels = [[] for i in range(10)]
+    features_img = []
+    features_lm = []
+    labels = []
     with open(label_abs_path, 'r') as f:
         lines = f.readlines()
 
@@ -37,16 +39,20 @@ def read_features_labels(label_abs_path, root_path):
             # if label == -1:  # 6 classes 分类
             #     continue
             img, landmark = face_align_and_landmark(root_path + img_path)
-            features_img[fold_index].append(img)
-            features_lm[fold_index].append(landmark)
-            labels[fold_index].append(label)
+            features_img.append(img)
+            features_lm.append(landmark)
+            labels.append(label)
             # print(img.shape, landmark.shape, label)
             # return
+            cnt += 1
+            # if cnt == 20:
+            #     break
             
-    return features_img, features_lm, labels
+    # return features_img, features_lm, labels
+    return list(zip(features_img, features_lm, labels))
                         
 
-def face_align_and_landmark(img_path, img_size=(224, 224)):
+def face_align_and_landmark(img_path, img_size=(128, 128)):
     rows, cols = img_size
 
     image_array = cv2.imread(img_path)
@@ -119,11 +125,11 @@ def face_align_and_landmark(img_path, img_size=(224, 224)):
     return cropped_face, np.stack(list_landmarks, axis=1)
 
 
-def resize_img_and_landmark(image_array, landmarks, img_size=(224, 224)):
+def resize_img_and_landmark(image_array, landmarks):
     img_crop = Image.fromarray(image_array)
     ori_size = img_crop.size
-    img_crop = img_crop.resize((img_size[0], img_size[1]))
-    ratio = (img_size[0] / ori_size[0], img_size[1] / ori_size[1])
+    img_crop = img_crop.resize((128, 128))
+    ratio = (128 / ori_size[0], 128 / ori_size[1])
     transferred_landmarks = defaultdict(list)
 
     for facial_feature in landmarks.keys():
@@ -213,15 +219,26 @@ if __name__ == '__main__':
     # exit(0)
     # 配置参数
     file_name = '../../data/cohn-kanade-images/'
-    save_path = '../../data/ck+_6_classes_img_and_55_landmark_106_224.pickle'
+    save_path = '../../data/ck+_6_classes_img_and_55_landmark_106_shuffle.pickle'
     label_abs_path = 'G:/dataset/CKplus10G/CK+106.txt'
     root_path = 'G:/dataset/CKplus10G/'
 
     # 读取数据 原标签是从1开始 所以要减 1, 把标签7改为 类别2, 一共593个表情序列 但能用的只有327个
-    feature_img, feature_lm, labels = read_features_labels(label_abs_path, root_path)
-    print(len(feature_img), len(feature_lm), len(labels))
-    print(len(feature_img[0]), len(feature_lm[0]), len(labels[0]))
-    print(feature_img[0][0].shape, feature_lm[0][0].shape, labels[0][0])
+    tripet_data = read_features_labels(label_abs_path, root_path)
+    len_data = len(tripet_data) 
+    print(len_data)
+    # 打乱并分 10 fold
+    random.shuffle(tripet_data)
+    data_fold = []
+    fold, fold_num = 10, 93
+    # start = 0
+    for i in range(0, len_data, fold_num):
+        data_fold.append(tripet_data[i: min(i + fold_num, len_data)])  # (10, 119, 3)
+    data_fold_transpose = [[[] for j in range(3) ] for i in range(10)]  # 放每个人的所有图片
+    for fold in range(10):
+        for in_fold in range(len(data_fold[fold])):
+            for tri_index in range(3):
+                data_fold_transpose[fold][tri_index].append(data_fold[fold][in_fold][tri_index])
     # exit(0) 
     
 
@@ -229,9 +246,9 @@ if __name__ == '__main__':
     with open(save_path, 'wb') as pfile:
         pickle.dump(
             [{
-                'img': feature_img[i],
-                'landmark': feature_lm[i],
-                'labels': labels[i]
+                'img': data_fold_transpose[i][0],
+                'landmark': data_fold_transpose[i][1],
+                'labels': data_fold_transpose[i][2]
             } for i in range(10)],
             pfile, pickle.HIGHEST_PROTOCOL
         )

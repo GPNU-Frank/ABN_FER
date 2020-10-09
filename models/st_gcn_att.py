@@ -57,7 +57,6 @@ class Model(nn.Module):
         self.st_gcn_networks = nn.ModuleList((
             st_gcn(in_channels, 64, kernel_size, 1, residual=False, **kwargs0),
             st_gcn(64, 64, kernel_size, 1, **kwargs),
-            st_gcn(64, 128, kernel_size, 1, **kwargs),
         ))
         # initialize parameters for edge importance weighting
         if edge_importance_weighting:
@@ -69,8 +68,7 @@ class Model(nn.Module):
             self.edge_importance = [1] * len(self.st_gcn_networks)
 
         # fcn for prediction
-        # self.fcn = nn.Conv2d(64, num_class, kernel_size=1)
-        self.fcn = nn.Conv2d(128, num_class, kernel_size=1)
+        self.fcn = nn.Conv2d(64, num_class, kernel_size=1)
 
     def forward(self, x):
 
@@ -190,6 +188,22 @@ class st_gcn(nn.Module):
             nn.Dropout(dropout, inplace=True),
         )
 
+        self.t_att = nn.Sequential(
+            nn.Conv2d(
+                out_channels,
+                out_channels,
+                (kernel_size[0], 1),
+                (stride, 1),
+                padding,
+            ),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm2d(out_channels),
+            nn.Sigmoid(),
+        )
+
+        self.s_att = ConvTemporalGraphical(1, 1, kernel_size[1])
+        self.sigmoid = nn.Sigmoid()
+
         if not residual:
             self.residual = lambda x: 0
 
@@ -212,7 +226,17 @@ class st_gcn(nn.Module):
 
         res = self.residual(x)
         x, A = self.gcn(x, A)
-        x = self.tcn(x) + res
+
+        # attention
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        s_out, A = self.s_att(avg_out, A) 
+        s_out = self.sigmoid(s_out)
+
+        t_x = self.tcn(x)
+        t_out = self.t_att(t_x)
+
+        t_x = t_x * s_out * t_out
+        x = t_x + res
 
         return self.relu(x), A
     

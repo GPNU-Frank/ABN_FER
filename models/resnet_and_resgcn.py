@@ -91,10 +91,10 @@ class Bottleneck(nn.Module):
         return out
 
 
-class ResNetAndGCN(nn.Module):
+class ResNetAndResGCN(nn.Module):
 
     def __init__(self, depth, num_classes=1000, gcn_hidden=512, gcn_out=64, dropout=0.5):
-        super(ResNetAndGCN, self).__init__()
+        super(ResNetAndResGCN, self).__init__()
         # Model type specifies number of layers for CIFAR-10 model
         assert (depth - 2) % 6 == 0, 'depth should be 6n+2'
         n = (depth - 2) // 6
@@ -108,24 +108,19 @@ class ResNetAndGCN(nn.Module):
         # self.graph = Graph({})
 
         self.inplanes = 64
-        self.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3,
+        self.conv1 = nn.Conv2d(1, 64, kernel_size=3, stride=2, padding=1,
                                bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
         self.layer1 = self._make_layer(block, 64, n, down_size=True)
 
         self.gcn11 = ConvTemporalGraphical(64, 256, 1)
-        self.bn11 = nn.BatchNorm2d(256)
         self.gcn12 = ConvTemporalGraphical(256, 64, 1)
-        self.bn12 = nn.BatchNorm2d(64)
 
         self.layer2 = self._make_layer(block, 128, n, stride=2, down_size=True)
         # self.upsample2 = nn.functional.upsample()
         self.gcn21 = ConvTemporalGraphical(128, 256, 1)
-        self.bn21 = nn.BatchNorm2d(256)
-        self.gcn22 = ConvTemporalGraphical(256, 64, 1)
-        self.bn22 = nn.BatchNorm2d(64)
-
+        self.gcn22 = ConvTemporalGraphical(256, 128, 1)
         # self.att_layer3 = self._make_layer(block, 64, n, stride=1, down_size=False)
         # self.bn_att = nn.BatchNorm2d(64 * block.expansion)
         # self.att_conv   = nn.Conv2d(64 * block.expansion, num_classes, kernel_size=1, padding=0,
@@ -141,20 +136,16 @@ class ResNetAndGCN(nn.Module):
 
         self.layer3 = self._make_layer(block, 256, n, stride=2, down_size=True)
 
-        self.gcn31 = ConvTemporalGraphical(256, 256, 1)
-        self.bn31 = nn.BatchNorm2d(256)
-        self.gcn32 = ConvTemporalGraphical(256, 64, 1)
-        self.bn32 = nn.BatchNorm2d(64)
+        # self.gcn31 = ConvTemporalGraphical(256, 512, 1)
+        # self.gcn32 = ConvTemporalGraphical(512, 256, 1)
         # self.avgpool = nn.AvgPool2d(8)
 
-        self.layer4 = self._make_layer(block, 512, n, stride=2, down_size=True)
+        self.layer4 = self._make_layer(block, 256, n, stride=2, down_size=True)
         self.avgpool = nn.AdaptiveAvgPool2d(1)
 
         # self.fc = nn.Linear(256 * block.expansion, num_classes)
-        self.fc1 = nn.Linear(512 + 64 * 3, 256)
-        self.bn_f1 = nn.BatchNorm1d(256)
-        self.drop_f1 = nn.Dropout(0.5)
-        self.fc2 = nn.Linear(256, num_classes)
+        self.fc = nn.Linear(256 + 128 + 64, num_classes)
+
         # self.fc1 = nn.Linear(256, num_classes)
 
         # print(block, n)
@@ -253,12 +244,10 @@ class ResNetAndGCN(nn.Module):
         # x = F.upsample(x, (128, 128))
         node1 = self.get_landmark_feature(x, landmark, ratio=2)
         x_gcn1, _ = self.gcn11(node1, self.A)
-        x_gcn1 = self.bn11(x_gcn1)
-        x_gcn1 = self.relu(x_gcn1)
-
         x_gcn1, _ = self.gcn12(x_gcn1, self.A)
-        x_gcn1 = self.bn12(x_gcn1)
-        x_gcn1 = self.relu(x_gcn1)
+        # residual
+        x_gcn1 += node1
+
         x_gcn1 = F.adaptive_avg_pool2d(x_gcn1, 1)
         x_gcn1 = x_gcn1.squeeze(-1).squeeze(-1)
 
@@ -267,12 +256,10 @@ class ResNetAndGCN(nn.Module):
         # x = F.upsample(x, (128, 128))
         node2 = self.get_landmark_feature(x, landmark, ratio=4)
         x_gcn2, _ = self.gcn21(node2, self.A)
-        x_gcn2 = self.bn21(x_gcn2)
-        x_gcn2 = self.relu(x_gcn2)
-
         x_gcn2, _ = self.gcn22(x_gcn2, self.A)
-        x_gcn2 = self.bn22(x_gcn2)
-        x_gcn2 = self.relu(x_gcn2)
+        # residual
+        x_gcn2 += node2
+
         x_gcn2 = F.adaptive_avg_pool2d(x_gcn2, 1)
         x_gcn2 = x_gcn2.squeeze(-1).squeeze(-1)
 
@@ -289,29 +276,24 @@ class ResNetAndGCN(nn.Module):
         # rx = rx + x
         rx = x
         rx = self.layer3(rx)  # 32 * 32
-        bz, c, h, w = rx.size()
-        # rx = F.upsample(rx, (128, 128))
-        node3 = self.get_landmark_feature(rx, landmark, ratio=8)
-        x_gcn3, _ = self.gcn31(node3, self.A)
-        x_gcn3 = self.bn31(x_gcn3)
-        x_gcn3 = self.relu(x_gcn3)
-
-        x_gcn3, _ = self.gcn32(x_gcn3, self.A)
-        x_gcn3 = self.bn32(x_gcn3)
-        x_gcn3 = self.relu(x_gcn3)
-        x_gcn3 = F.adaptive_avg_pool2d(x_gcn3, 1)
-        x_gcn3 = x_gcn3.squeeze(-1).squeeze(-1)
-
         rx = self.layer4(rx)
+        # bz, c, h, w = rx.size()
+        # # rx = F.upsample(rx, (128, 128))
+        # node3 = self.get_landmark_feature(rx, landmark, ratio=8)
+        # x_gcn3, _ = self.gcn31(node3, self.A)
+        # x_gcn3, _ = self.gcn32(x_gcn3, self.A)
+        # # residual
+        # x_gcn3 += node3
+
+        # x_gcn3 = F.adaptive_avg_pool2d(x_gcn3, 1)
+        # x_gcn3 = x_gcn3.squeeze(-1).squeeze(-1)
+
+        # rx = self.layer4(rx)
         rx = self.avgpool(rx)
         rx = rx.view(rx.size(0), -1)
 
-        rx = torch.cat([rx, x_gcn1, x_gcn2, x_gcn3], dim=1)
-        rx = self.fc1(rx)
-        rx = self.bn_f1(rx)
-        rx = self.relu(rx)
-        # rx = self.drop_f1(rx)
-        rx = self.fc2(rx)
+        rx = torch.cat([rx, x_gcn1, x_gcn2], dim=1)
+        rx = self.fc(rx)
         # rx = F.relu(rx)
         # rx = F.dropout(rx, 0.7)
         # rx = self.fc1(rx)

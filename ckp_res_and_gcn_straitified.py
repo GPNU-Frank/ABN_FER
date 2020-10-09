@@ -24,17 +24,18 @@ import numpy as np
 from utils import Bar, Logger, AverageMeter, accuracy, mkdir_p, savefig, pickle_2_img_single, pickle_2_img_and_landmark
 import logging
 import matplotlib.pyplot as plt 
-
+from sklearn.model_selection import StratifiedKFold, KFold
+import pickle
 
 parser = argparse.ArgumentParser(description='PyTorch ckp Training')
 # Datasets
 parser.add_argument('-d', '--dataset', default='ckp', type=str)
-parser.add_argument('--dataset-path', default='data\ck+_6_classes_img_and_55_landmark_106.pickle')  # windows style
+parser.add_argument('--dataset-path', default='data\ck+_6_classes_img_and_55_landmark_106_stratified.pickle')  # windows style
 # parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
 #                     help='number of data loading workers (default: 4)')
 parser.add_argument('-f', '--folds', default=10, type=int, help='k-folds cross validation.')
 # Optimization options
-parser.add_argument('--epochs', default=50, type=int, metavar='N',
+parser.add_argument('--epochs', default=20, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -54,7 +55,7 @@ parser.add_argument('--momentum', default=0.8, type=float, metavar='M',
 parser.add_argument('--weight-decay', '--wd', default=1e-3, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
 # Checkpoints
-parser.add_argument('-c', '--checkpoint', default='checkpoints/ckp_resnet_and_gcn', type=str, metavar='PATH',
+parser.add_argument('-c', '--checkpoint', default='checkpoints/ckp_resnet_and_gcn_stratified', type=str, metavar='PATH',
                     help='path to save checkpoint (default: checkpoint)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
@@ -105,7 +106,18 @@ def main():
 
     # load data
     print('==> Preparing dataset %s' % args.dataset)
-    features, landmarks, labels = pickle_2_img_and_landmark(args.dataset_path)
+    with open(args.dataset_path, 'rb') as f:
+        data = pickle.load(f)
+    inputs, labels = [], []
+    for i, id_group in enumerate(data):
+        inputs.append([])
+        labels.append([])
+        for j, group in enumerate(id_group):
+            inputs[i].append((group[0], group[1]))
+            if j == 0:
+                labels[i].append(group[2])
+    inputs, labels = np.array(inputs), np.array(labels)
+    sfolder = StratifiedKFold(n_splits=10, shuffle=True)                
     num_classes = 6
 
     # Model
@@ -168,7 +180,9 @@ def main():
 
     acc_fold = []
     reset_lr = state['lr']
-    for f_num in range(args.folds):
+    f_num = -1
+    for train_index, test_index in sfolder.split(inputs, labels):
+        f_num += 1
         state['lr'] = reset_lr
         model.reset_all_weights()
         # optimizer = optim.SGD([
@@ -195,22 +209,35 @@ def main():
     
 
         # 10-fold cross validation
-        train_x, train_lm, train_y = [], [], []
-        test_x, test_lm, test_y = [], [], []
-        for id_fold in range(args.folds):
-            if id_fold == f_num:
-                test_x = features[id_fold]
-                test_lm = landmarks[id_fold]
-                test_y = labels[id_fold]
-            else:
-                train_x = train_x + features[id_fold]
-                train_lm = train_lm + landmarks[id_fold]
-                train_y = train_y + labels[id_fold]
+        train_group = inputs[train_index]
+        train_label = labels[train_index]
+        test_group = inputs[test_index]
+        test_label = labels[test_index]
+        print(len(train_group), len(test_group))
+        img_trainset, lm_trainset, label_trianset = [], [], []
+        img_testset, lm_testset, label_testset = [], [], []
+        for index, group in enumerate(train_group):
+            for instance in group:
+                img_trainset.append(instance[0])
+                lm_trainset.append(instance[1])
+                label_trianset.append(train_label[index])
+
+        train_x = np.stack(img_trainset, axis=0)
+        train_lm = np.stack(lm_trainset, axis=0)
+        train_y = np.array(label_trianset).squeeze()
+        for index, group in enumerate(test_group):
+            for instance in group:
+                img_testset.append(instance[0])
+                lm_testset.append(instance[1])
+                label_testset.append(test_label[index])
+        test_x = np.stack(img_testset, axis=0)
+        test_lm = np.stack(lm_testset, axis=0)
+        test_y = np.array(label_testset).squeeze()
         # convert array to tensor
         train_x = torch.tensor(train_x, dtype=torch.float) / 255.0  #(b_s, 128, 128)
         train_x = train_x.unsqueeze(1)  #(b_s, 1, 128, 128)
 
-        train_lm = np.stack(train_lm)
+        # train_lm = np.stack(train_lm)
         # 只要坐标信息， 不需要归一化
         # train_lm = (train_lm - np.mean(train_lm, axis=0)) / np.std(train_lm, axis=0)
         train_lm = torch.tensor(train_lm, dtype=torch.long)
@@ -222,7 +249,7 @@ def main():
         # test_lm = (test_lm - np.mean(test_lm, axis=0)) / np.std(test_lm, axis=0)
         test_lm = torch.tensor(test_lm, dtype=torch.long)
         # test_lm = test_lm.unsqueeze(2)
-        train_y, test_y = torch.tensor(train_y), torch.tensor(test_y)
+        train_y, test_y = torch.tensor(train_y, dtype=torch.long), torch.tensor(test_y, dtype=torch.long)
 
         train_dataset = torch.utils.data.TensorDataset(train_x, train_lm, train_y)
         train_iter = torch.utils.data.DataLoader(
